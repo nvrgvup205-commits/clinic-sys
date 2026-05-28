@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { supabase, uploadImage } from '../lib/supabase'
 import { useRealtime } from '../lib/useRealtime'
+import * as XLSX from 'xlsx'
 import LiveBadge from '../components/LiveBadge'
 import ImageUpload from '../components/ImageUpload'
 import {
@@ -10,7 +11,7 @@ import {
   Settings, Phone, CreditCard, Activity, Clock, ShieldCheck,
   Eye, EyeOff, Sparkles, Home, FileText, Pill, DollarSign,
   TrendingUp, BarChart3, X, Save, Award, Bell, Image as ImageIcon,
-  Heart, Receipt
+  Heart, Receipt, Upload, Download, FileSpreadsheet
 } from 'lucide-react'
 
 export default function StaffPortal() {
@@ -1225,7 +1226,7 @@ function DoctorDashboard({ user, clinic, onLogout }) {
 
   const load = async () => {
     const [a, s] = await Promise.all([
-      supabase.from('appointments').select('*, patients(*), medical_records(*)').eq('doctor_id', user.id).order('appointment_date', { ascending: false }).order('appointment_time'),
+      supabase.from('appointments').select('*, patients(*), medical_records(*)').eq('doctor_id', user.id).or('paid_at.not.is.null,status.eq.completed').order('appointment_date', { ascending: false }).order('appointment_time'),
       supabase.from('clinic_services').select('*').eq('clinic_id', clinic.id).eq('is_active', true)
     ])
     setAppointments(a.data || [])
@@ -1400,7 +1401,7 @@ function ExaminationView({ apt, clinic, services, doctor, onClose }) {
 
   const total = form.services_provided.reduce((sum, s) => sum + (s.price * s.qty), 0)
   const finalTotal = total - parseFloat(form.discount || 0)
-  const paymentStatus = parseFloat(form.paid_amount) >= finalTotal ? 'paid' : parseFloat(form.paid_amount) > 0 ? 'partial' : 'unpaid'
+  const paymentStatus = existingRecord?.payment_status || 'reception' // الدفع يتم من الاستقبال فقط
 
   const addService = (s) => {
     const existing = form.services_provided.find(x => x.id === s.id)
@@ -1436,8 +1437,8 @@ function ExaminationView({ apt, clinic, services, doctor, onClose }) {
       diagnosis: form.diagnosis, treatment: form.treatment, prescription: form.prescription,
       next_visit_notes: form.next_visit_notes, private_notes: form.private_notes,
       services_provided: form.services_provided, total_amount: finalTotal,
-      discount: parseFloat(form.discount) || 0, paid_amount: parseFloat(form.paid_amount) || 0,
-      payment_status: paymentStatus, payment_method: form.payment_method,
+      discount: parseFloat(form.discount) || 0, paid_amount: existingRecord?.paid_amount || 0,
+      payment_status: paymentStatus, payment_method: 'reception',
       xray_images: form.xray_images,
     }
 
@@ -1541,9 +1542,19 @@ function ExaminationView({ apt, clinic, services, doctor, onClose }) {
           )}
         </div>
 
-        {/* الفاتورة */}
+        {/* الخدمات والتكلفة - بدون تحصيل من الدكتور */}
         <div className="bg-white rounded-3xl p-6 shadow-xl border border-amber-100">
-          <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><DollarSign className="w-5 h-5 text-amber-600" /> الفاتورة</h3>
+          <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
+            <div>
+              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <DollarSign className="w-5 h-5 text-amber-600" /> الخدمات المقدمة
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">الدكتور يحدد الخدمات فقط، والتحصيل يتم من الاستقبال</p>
+            </div>
+            <span className="bg-sky-50 text-sky-700 border border-sky-100 px-3 py-2 rounded-xl text-xs font-bold">
+              الدفع عند الاستقبال
+            </span>
+          </div>
 
           {services.length > 0 && (
             <div className="mb-4">
@@ -1551,7 +1562,7 @@ function ExaminationView({ apt, clinic, services, doctor, onClose }) {
               <div className="flex flex-wrap gap-2">
                 {services.map(s => (
                   <button key={s.id} onClick={() => addService(s)} className="bg-amber-50 hover:bg-amber-100 border-2 border-amber-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-700">
-                    {s.name} <span className="text-amber-700">({s.price})</span>
+                    {s.name} <span className="text-amber-700">({s.price} ر.س)</span>
                   </button>
                 ))}
               </div>
@@ -1567,7 +1578,7 @@ function ExaminationView({ apt, clinic, services, doctor, onClose }) {
                     <button onClick={() => updateQty(s.id, s.qty - 1)} className="w-7 h-7 bg-red-100 text-red-600 rounded-lg font-bold">−</button>
                     <span className="w-8 text-center font-bold">{s.qty}</span>
                     <button onClick={() => updateQty(s.id, s.qty + 1)} className="w-7 h-7 bg-emerald-100 text-emerald-600 rounded-lg font-bold">+</button>
-                    <span className="font-bold text-amber-700 min-w-[70px] text-left">{(s.price * s.qty).toFixed(0)}</span>
+                    <span className="font-bold text-amber-700 min-w-[90px] text-left">{(s.price * s.qty).toFixed(0)} ر.س</span>
                     <button onClick={() => removeService(s.id)} className="text-red-500 p-1"><X className="w-4 h-4" /></button>
                   </div>
                 </div>
@@ -1575,36 +1586,23 @@ function ExaminationView({ apt, clinic, services, doctor, onClose }) {
             </div>
           ) : <div className="text-center py-6 text-slate-500 text-sm bg-slate-50 rounded-xl mb-4">لا توجد خدمات</div>}
 
-          <div className="grid sm:grid-cols-3 gap-3 mb-4">
+          <div className="grid sm:grid-cols-3 gap-3">
             <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1">الإجمالي</label>
+              <label className="block text-xs font-bold text-slate-600 mb-1">إجمالي الخدمات</label>
               <div className="px-3 py-2 bg-slate-100 rounded-xl font-bold text-lg">{total.toFixed(0)} ر.س</div>
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1">الخصم</label>
+              <label className="block text-xs font-bold text-slate-600 mb-1">خصم طبي / إداري</label>
               <input type="number" value={form.discount} onChange={(e) => setForm({...form, discount: e.target.value})} className="w-full px-3 py-2 border-2 border-slate-200 rounded-xl focus:border-amber-500 outline-none font-bold" />
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1">المدفوع</label>
-              <input type="number" value={form.paid_amount} onChange={(e) => setForm({...form, paid_amount: e.target.value})} className="w-full px-3 py-2 border-2 border-slate-200 rounded-xl focus:border-emerald-500 outline-none font-bold" />
+              <label className="block text-xs font-bold text-slate-600 mb-1">الصافي المطلوب</label>
+              <div className="px-3 py-2 bg-amber-50 text-amber-700 rounded-xl font-black text-lg">{finalTotal.toFixed(0)} ر.س</div>
             </div>
           </div>
 
-          <div className="bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-200 rounded-2xl p-4">
-            <div className="grid sm:grid-cols-3 gap-2 text-center">
-              <div><p className="text-xs text-slate-600">الصافي</p><p className="text-2xl font-black text-amber-700">{finalTotal.toFixed(0)}</p></div>
-              <div><p className="text-xs text-slate-600">المتبقي</p><p className="text-2xl font-black text-red-600">{Math.max(0, finalTotal - parseFloat(form.paid_amount || 0)).toFixed(0)}</p></div>
-              <div><p className="text-xs text-slate-600">الحالة</p><p className={`text-lg font-black ${paymentStatus === 'paid' ? 'text-emerald-600' : paymentStatus === 'partial' ? 'text-amber-600' : 'text-red-600'}`}>{paymentStatus === 'paid' ? 'مدفوع' : paymentStatus === 'partial' ? 'جزئي' : 'غير مدفوع'}</p></div>
-            </div>
-          </div>
-
-          <div className="mt-3">
-            <label className="block text-sm font-bold text-slate-700 mb-1">طريقة الدفع</label>
-            <select value={form.payment_method} onChange={(e) => setForm({...form, payment_method: e.target.value})} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:border-amber-500 outline-none">
-              <option value="cash">💵 نقدي</option>
-              <option value="card">💳 بطاقة</option>
-              <option value="transfer">🏦 تحويل بنكي</option>
-            </select>
+          <div className="mt-4 bg-blue-50 border border-blue-100 rounded-2xl p-4 text-sm text-blue-800 font-bold">
+            ملاحظة: لا يتم تسجيل أي مدفوعات من شاشة الدكتور. الاستقبال هو المسؤول عن التحصيل وإصدار الفاتورة.
           </div>
         </div>
 
@@ -1630,7 +1628,11 @@ function ReceptionDashboard({ user, clinic, onLogout }) {
   const [complaints, setComplaints] = useState([])
   const [emergencies, setEmergencies] = useState([])
   const [payments, setPayments] = useState([])
+  const [services, setServices] = useState([])
+  const [insuranceCompanies, setInsuranceCompanies] = useState([])
   const [attendance, setAttendance] = useState(null)
+  const [selectedPaymentApt, setSelectedPaymentApt] = useState(null)
+  const [paymentForm, setPaymentForm] = useState({ service_id: '', amount: '', payment_method: 'cash', insurance_company_id: '', reference_no: '', notes: '' })
   const [loading, setLoading] = useState(true)
   const [notification, setNotification] = useState(null)
 
@@ -1658,18 +1660,22 @@ function ReceptionDashboard({ user, clinic, onLogout }) {
 
   const loadReceptionData = async () => {
     const today = new Date().toISOString().split('T')[0]
-    const [a, c, e, p, att] = await Promise.all([
-      supabase.from('appointments').select('*, patients(*), doctors(*), clinic_services(*)').eq('clinic_id', clinic.id).gte('appointment_date', today).order('appointment_date').order('appointment_time'),
+    const [a, c, e, p, att, srv, ins] = await Promise.all([
+      supabase.from('appointments').select('*, patients(*), doctors(*)').eq('clinic_id', clinic.id).gte('appointment_date', today).order('appointment_date').order('appointment_time'),
       supabase.from('complaints').select('*, patients(*)').eq('clinic_id', clinic.id).neq('status', 'resolved').order('created_at', { ascending: false }),
       supabase.from('emergency_requests').select('*, patients(*)').eq('clinic_id', clinic.id).neq('status', 'closed').order('created_at', { ascending: false }),
       supabase.from('payments').select('*').eq('clinic_id', clinic.id).gte('paid_at', `${today}T00:00:00`).order('paid_at', { ascending: false }),
       supabase.from('staff_attendance').select('*').eq('clinic_id', clinic.id).eq('staff_id', user.id).is('clock_out', null).order('clock_in', { ascending: false }).limit(1),
+      supabase.from('clinic_services').select('*').eq('clinic_id', clinic.id).eq('is_active', true).order('name'),
+      supabase.from('insurance_companies').select('*').eq('is_active', true).order('name'),
     ])
     setAppointments(a.data || [])
     setComplaints(c.data || [])
     setEmergencies(e.data || [])
     setPayments(p.data || [])
     setAttendance(att.data?.[0] || null)
+    setServices(srv.data || [])
+    setInsuranceCompanies(ins.data || [])
     setLoading(false)
   }
 
@@ -1694,31 +1700,87 @@ function ReceptionDashboard({ user, clinic, onLogout }) {
     await supabase.from('appointments').update({ status: 'confirmed', confirmed_by: user.id, confirmed_at: new Date().toISOString() }).eq('id', apt.id)
   }
 
-  const markPaid = async (apt) => {
-    const defaultAmount = apt.clinic_services?.price || 0
-    const amount = prompt('اكتب المبلغ المدفوع بالريال', defaultAmount)
-    if (!amount) return
-    const payment_method = prompt('طريقة الدفع: cash / card / transfer / insurance', 'cash') || 'cash'
+  const openPayment = (apt) => {
+    const firstService = services[0]
+    const patientInsuranceName = apt.patients?.insurance_company
+    const defaultInsurance = insuranceCompanies.find(x => x.name === patientInsuranceName)
+    const amount = firstService?.price || 0
+    setSelectedPaymentApt(apt)
+    setPaymentForm({
+      service_id: firstService?.id || '',
+      amount: amount ? String(amount) : '',
+      payment_method: patientInsuranceName ? 'insurance' : 'cash',
+      insurance_company_id: defaultInsurance?.id || '',
+      reference_no: '',
+      notes: '',
+    })
+  }
+
+  const updatePaymentService = (serviceId) => {
+    const srv = services.find(s => s.id === serviceId)
+    const price = paymentForm.payment_method === 'insurance' && srv?.insurance_price ? srv.insurance_price : srv?.price
+    setPaymentForm({ ...paymentForm, service_id: serviceId, amount: price ? String(price) : '' })
+  }
+
+  const submitPayment = async (e) => {
+    e.preventDefault()
+    if (!selectedPaymentApt) return
+    const amount = parseFloat(paymentForm.amount) || 0
+    if (amount <= 0) return alert('اكتب مبلغ صحيح')
+
+    const srv = services.find(s => s.id === paymentForm.service_id)
+    const now = new Date().toISOString()
+
+    const { data: invoice, error: invoiceError } = await supabase.from('invoices').insert([{
+      clinic_id: clinic.id,
+      patient_id: selectedPaymentApt.patient_id,
+      appointment_id: selectedPaymentApt.id,
+      invoice_no: `INV-${Date.now()}`,
+      items: srv ? [{ id: srv.id, name: srv.name, qty: 1, price: amount }] : [],
+      subtotal: amount,
+      discount: 0,
+      insurance_discount: 0,
+      total: amount,
+      paid_amount: amount,
+      remaining_amount: 0,
+      payment_status: 'paid',
+      issued_by: user.id,
+      issued_at: now,
+    }]).select().single()
+
+    if (invoiceError) return alert('❌ ' + invoiceError.message)
 
     const { error } = await supabase.from('payments').insert([{
       clinic_id: clinic.id,
-      patient_id: apt.patient_id,
-      appointment_id: apt.id,
-      amount: parseFloat(amount) || 0,
-      payment_method,
+      patient_id: selectedPaymentApt.patient_id,
+      appointment_id: selectedPaymentApt.id,
+      invoice_id: invoice?.id,
+      amount,
+      payment_method: paymentForm.payment_method,
+      reference_no: paymentForm.reference_no || null,
       received_by: user.id,
-      notes: `دفعة من الاستقبال للموعد ${apt.appointment_date}`,
+      notes: paymentForm.notes || `تحصيل استقبال - ${srv?.name || 'خدمة'}`,
     }])
     if (error) return alert('❌ ' + error.message)
 
-    await supabase.from('appointments').update({ paid_by: user.id, paid_at: new Date().toISOString(), status: apt.status === 'pending' ? 'confirmed' : apt.status }).eq('id', apt.id)
-    alert('✓ تم تسجيل الدفع')
+    await supabase.from('appointments').update({
+      service_id: paymentForm.service_id || null,
+      paid_by: user.id,
+      paid_at: now,
+      checked_in_by: user.id,
+      checked_in_at: now,
+      status: selectedPaymentApt.status === 'pending' ? 'confirmed' : selectedPaymentApt.status,
+    }).eq('id', selectedPaymentApt.id)
+
+    setSelectedPaymentApt(null)
+    alert('✓ تم تسجيل الدفع وتحويل المريض للدكتور')
     loadReceptionData()
   }
 
   const today = new Date().toISOString().split('T')[0]
   const todayAppointments = appointments.filter(a => a.appointment_date === today)
   const pendingAppointments = appointments.filter(a => a.status === 'pending')
+  const readyForDoctor = appointments.filter(a => a.paid_at)
   const todayRevenue = payments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0)
 
   return (
@@ -1732,6 +1794,7 @@ function ReceptionDashboard({ user, clinic, onLogout }) {
             { id: 'dashboard', label: 'الرئيسية', icon: BarChart3 },
             { id: 'appointments', label: 'المواعيد', icon: Calendar },
             { id: 'payments', label: 'المدفوعات', icon: Receipt },
+            { id: 'insurance', label: 'التأمين', icon: ShieldCheck },
             { id: 'emergency', label: 'الطوارئ', icon: AlertCircle },
             { id: 'complaints', label: 'الشكاوى', icon: FileText },
           ].map(t => (
@@ -1759,25 +1822,140 @@ function ReceptionDashboard({ user, clinic, onLogout }) {
           <>
             {tab === 'dashboard' && (
               <div className="space-y-6">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                   <BigStat icon={Calendar} label="مواعيد اليوم" value={todayAppointments.length} gradient="gradient-medical" onClick={() => setTab('appointments')} />
                   <BigStat icon={Clock} label="بانتظار التأكيد" value={pendingAppointments.length} gradient="gradient-warning" onClick={() => setTab('appointments')} />
+                  <BigStat icon={CheckCircle} label="جاهز للدكتور" value={readyForDoctor.length} gradient="gradient-success" onClick={() => setTab('appointments')} />
                   <BigStat icon={AlertCircle} label="طلبات طوارئ" value={emergencies.length} gradient="gradient-danger" onClick={() => setTab('emergency')} />
                   <BigStat icon={DollarSign} label="تحصيل اليوم" value={todayRevenue.toFixed(0)} suffix="ر.س" gradient="gradient-success" onClick={() => setTab('payments')} />
                 </div>
-                <ReceptionAppointments appointments={todayAppointments} onConfirm={confirmAppointment} onPaid={markPaid} title="مواعيد اليوم" />
+                <ReceptionAppointments appointments={todayAppointments} onConfirm={confirmAppointment} onPaid={openPayment} title="مواعيد اليوم" />
               </div>
             )}
-            {tab === 'appointments' && <ReceptionAppointments appointments={appointments} onConfirm={confirmAppointment} onPaid={markPaid} title="كل المواعيد القادمة" />}
+            {tab === 'appointments' && <ReceptionAppointments appointments={appointments} onConfirm={confirmAppointment} onPaid={openPayment} title="كل المواعيد القادمة" />}
             {tab === 'payments' && <ReceptionPayments payments={payments} total={todayRevenue} />}
+            {tab === 'insurance' && <ReceptionInsurance companies={insuranceCompanies} patients={appointments.map(a => a.patients).filter(Boolean)} />}
             {tab === 'emergency' && <EmergencyTab clinic={clinic} user={user} emergencies={emergencies} onUpdate={loadReceptionData} />}
             {tab === 'complaints' && <ComplaintsManageTab complaints={complaints} />}
           </>
         )}
       </div>
+
+      {selectedPaymentApt && (
+        <PaymentModal
+          apt={selectedPaymentApt}
+          services={services}
+          insuranceCompanies={insuranceCompanies}
+          form={paymentForm}
+          setForm={setPaymentForm}
+          onServiceChange={updatePaymentService}
+          onSubmit={submitPayment}
+          onClose={() => setSelectedPaymentApt(null)}
+        />
+      )}
     </div>
   )
 }
+
+function PaymentModal({ apt, services, insuranceCompanies, form, setForm, onServiceChange, onSubmit, onClose }) {
+  const selectedService = services.find(s => s.id === form.service_id)
+  const patientInsurance = apt.patients?.insurance_company
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4" dir="rtl">
+      <div className="bg-white rounded-3xl p-6 shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="flex items-start justify-between gap-3 mb-5">
+          <div>
+            <h3 className="text-2xl font-black text-slate-800 flex items-center gap-2"><Receipt className="w-7 h-7 text-emerald-600" /> تسجيل الدفع</h3>
+            <p className="text-sm text-slate-500 mt-1">{apt.patients?.name} • {apt.doctors?.name}</p>
+          </div>
+          <button onClick={onClose} className="bg-slate-100 hover:bg-slate-200 p-2 rounded-xl"><X className="w-5 h-5" /></button>
+        </div>
+
+        {patientInsurance && (
+          <div className="bg-violet-50 border border-violet-100 rounded-2xl p-4 mb-4">
+            <p className="text-sm font-bold text-violet-800 flex items-center gap-2"><ShieldCheck className="w-5 h-5" /> لدى المريض تأمين: {patientInsurance}</p>
+            {apt.patients?.insurance_policy_no && <p className="text-xs text-violet-700 mt-1">رقم الوثيقة: {apt.patients.insurance_policy_no}</p>}
+          </div>
+        )}
+
+        <form onSubmit={onSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">الخدمة</label>
+            <select value={form.service_id} onChange={(e) => onServiceChange(e.target.value)} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none">
+              <option value="">اختر الخدمة</option>
+              {services.map(s => <option key={s.id} value={s.id}>{s.name} - {s.price} ر.س</option>)}
+            </select>
+          </div>
+
+          {selectedService && (
+            <div className="grid grid-cols-3 gap-2 bg-slate-50 rounded-2xl p-3 text-center">
+              <div><p className="text-xs text-slate-500">السعر</p><p className="font-black text-slate-800">{selectedService.price || 0}</p></div>
+              <div><p className="text-xs text-slate-500">سعر التأمين</p><p className="font-black text-violet-700">{selectedService.insurance_price || 0}</p></div>
+              <div><p className="text-xs text-slate-500">الخصم</p><p className="font-black text-amber-700">{selectedService.discount_pct || 0}%</p></div>
+            </div>
+          )}
+
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1">طريقة الدفع</label>
+              <select value={form.payment_method} onChange={(e) => setForm({...form, payment_method: e.target.value})} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none">
+                <option value="cash">نقدي</option>
+                <option value="card">بطاقة</option>
+                <option value="transfer">تحويل</option>
+                <option value="insurance">تأمين</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1">المبلغ المدفوع</label>
+              <input type="number" required value={form.amount} onChange={(e) => setForm({...form, amount: e.target.value})} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none font-bold" />
+            </div>
+          </div>
+
+          {form.payment_method === 'insurance' && (
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1">شركة التأمين</label>
+              <select value={form.insurance_company_id} onChange={(e) => setForm({...form, insurance_company_id: e.target.value})} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none">
+                <option value="">اختر شركة التأمين</option>
+                {insuranceCompanies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+          )}
+
+          <div className="grid md:grid-cols-2 gap-4">
+            <input placeholder="رقم مرجعي / عملية الدفع" value={form.reference_no} onChange={(e) => setForm({...form, reference_no: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" />
+            <input placeholder="ملاحظات" value={form.notes} onChange={(e) => setForm({...form, notes: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" />
+          </div>
+
+          <button className="w-full py-4 gradient-success text-white rounded-2xl font-black shadow-xl flex items-center justify-center gap-2">
+            <CheckCircle className="w-5 h-5" /> تأكيد الدفع وتحويل المريض للدكتور
+          </button>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+function ReceptionInsurance({ companies, patients }) {
+  const insuredPatients = patients.filter((p, idx, arr) => p?.insurance_company && arr.findIndex(x => x?.id === p.id) === idx)
+  return (
+    <div className="grid lg:grid-cols-2 gap-6">
+      <div className="bg-white rounded-3xl p-6 shadow-xl border border-violet-100">
+        <h3 className="text-xl font-black text-slate-800 mb-4 flex items-center gap-2"><ShieldCheck className="w-6 h-6 text-violet-600" /> شركات التأمين</h3>
+        {companies.length === 0 ? <EmptyAdminState icon={ShieldCheck} message="لا توجد شركات تأمين" /> : (
+          <div className="space-y-2">{companies.map(c => <div key={c.id} className="bg-violet-50 rounded-xl p-3 flex items-center justify-between"><span className="font-bold text-slate-800">{c.name}</span><span className="text-xs text-violet-700">مفعّلة</span></div>)}</div>
+        )}
+      </div>
+      <div className="bg-white rounded-3xl p-6 shadow-xl border border-sky-100">
+        <h3 className="text-xl font-black text-slate-800 mb-4">مرضى لديهم تأمين في مواعيد اليوم</h3>
+        {insuredPatients.length === 0 ? <EmptyAdminState icon={Users} message="لا توجد بيانات تأمين للمرضى اليوم" /> : (
+          <div className="space-y-2">{insuredPatients.map(p => <div key={p.id} className="bg-sky-50 rounded-xl p-3"><p className="font-bold text-slate-800">{p.name}</p><p className="text-xs text-sky-700">{p.insurance_company} • {p.insurance_policy_no || 'بدون رقم وثيقة'}</p></div>)}</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 
 function ReceptionAppointments({ appointments, onConfirm, onPaid, title }) {
   return (
@@ -1953,6 +2131,7 @@ function AccountantDashboard({ user, clinic, onLogout }) {
             { id: 'dashboard', label: 'الرئيسية', icon: BarChart3 },
             { id: 'payments', label: 'الإيرادات', icon: Receipt },
             { id: 'expenses', label: 'المصروفات', icon: DollarSign },
+            { id: 'import', label: 'استيراد Excel', icon: FileSpreadsheet },
           ].map(t => (
             <button key={t.id} onClick={() => setTab(t.id)} className={`px-4 py-2 rounded-xl font-bold text-sm whitespace-nowrap flex items-center gap-1.5 ${tab === t.id ? 'gradient-purple text-white shadow-lg' : 'bg-white text-slate-700 border border-slate-100'}`}>
               <t.icon className="w-4 h-4" /> {t.label}
@@ -1978,7 +2157,249 @@ function AccountantDashboard({ user, clinic, onLogout }) {
         {tab === 'expenses' && (
           <ExpensesList expenses={expenses} showForm={showExpenseForm} setShowForm={setShowExpenseForm} form={expenseForm} setForm={setExpenseForm} onSubmit={addExpense} />
         )}
+        {tab === 'import' && <ImportDataTab clinic={clinic} user={user} onDone={loadAccountingData} />}
       </div>
+    </div>
+  )
+}
+
+
+function ImportDataTab({ clinic, user, onDone }) {
+  const templates = {
+    patients: {
+      title: 'المرضى',
+      table: 'patients',
+      required: ['الاسم الكامل', 'رقم الجوال'],
+      columns: ['الاسم الكامل', 'رقم الجوال', 'رقم الهوية', 'تاريخ الميلاد', 'الجنس', 'فصيلة الدم', 'الحساسيات', 'ملاحظات طبية', 'شركة التأمين', 'رقم بوليصة التأمين'],
+      sample: ['محمد أحمد', '0500000000', '1234567890', '28/05/1990', 'male', 'O+', 'لا يوجد', 'ملاحظات', 'بوبا العربية', 'POL-001']
+    },
+    income: {
+      title: 'الإيرادات القديمة',
+      table: 'payments',
+      required: ['التاريخ', 'المبلغ'],
+      columns: ['التاريخ', 'اسم المريض', 'رقم الجوال', 'الخدمة المقدمة', 'المبلغ', 'طريقة الدفع', 'اسم الدكتور', 'شركة التأمين', 'ملاحظات'],
+      sample: ['28/05/2026', 'محمد أحمد', '0500000000', 'كشف', '250', 'cash', 'د. أحمد', '', 'دفعة قديمة']
+    },
+    expenses: {
+      title: 'المصروفات',
+      table: 'expenses',
+      required: ['التاريخ', 'نوع المصروف', 'الوصف', 'المبلغ'],
+      columns: ['التاريخ', 'نوع المصروف', 'الوصف', 'المبلغ', 'طريقة الدفع', 'المورد', 'ملاحظات'],
+      sample: ['28/05/2026', 'الأدوية والمستلزمات', 'شراء مستلزمات', '1500', 'cash', 'مورد طبي', '']
+    },
+    doctors: {
+      title: 'الأطباء',
+      table: 'doctors',
+      required: ['الاسم'],
+      columns: ['الاسم', 'التخصص', 'الجوال', 'البريد الإلكتروني', 'اسم المستخدم', 'كلمة المرور'],
+      sample: ['د. أحمد محمد', 'طبيب عام', '0500000000', 'doctor@example.com', '1111', '1111']
+    },
+    invoices: {
+      title: 'الفواتير القديمة',
+      table: 'invoices',
+      required: ['رقم الفاتورة', 'التاريخ', 'المبلغ الإجمالي'],
+      columns: ['رقم الفاتورة', 'التاريخ', 'المريض', 'الخدمات', 'المبلغ الإجمالي', 'الخصم', 'المدفوع', 'المتبقي'],
+      sample: ['INV-OLD-001', '28/05/2026', 'محمد أحمد', 'كشف, تنظيف', '500', '0', '500', '0']
+    }
+  }
+
+  const [type, setType] = useState('patients')
+  const [rows, setRows] = useState([])
+  const [validRows, setValidRows] = useState([])
+  const [errors, setErrors] = useState([])
+  const [saving, setSaving] = useState(false)
+  const current = templates[type]
+
+  const normalizeKey = (row, key) => row[key] ?? row[key.trim()] ?? ''
+
+  const parseDate = (value) => {
+    if (!value) return null
+    if (typeof value === 'number') {
+      const d = XLSX.SSF.parse_date_code(value)
+      if (d) return `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`
+    }
+    const str = String(value).trim()
+    if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.substring(0, 10)
+    const m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+    if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
+    return str
+  }
+
+  const downloadTemplate = () => {
+    const ws = XLSX.utils.aoa_to_sheet([current.columns, current.sample])
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, current.title)
+    XLSX.writeFile(wb, `hulool-${type}-template.xlsx`)
+  }
+
+  const validateRows = (data) => {
+    const errs = []
+    const good = []
+    data.forEach((row, index) => {
+      const rowErrors = []
+      current.required.forEach(col => {
+        if (!String(normalizeKey(row, col)).trim()) rowErrors.push(`العمود مطلوب: ${col}`)
+      })
+      if (rowErrors.length) errs.push({ row: index + 2, errors: rowErrors, data: row })
+      else good.push({ ...row, __rowNumber: index + 2 })
+    })
+    setRows(data)
+    setErrors(errs)
+    setValidRows(good)
+  }
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const buffer = await file.arrayBuffer()
+    const wb = XLSX.read(buffer, { type: 'array' })
+    const ws = wb.Sheets[wb.SheetNames[0]]
+    const data = XLSX.utils.sheet_to_json(ws, { defval: '' })
+    validateRows(data)
+  }
+
+  const mapRowsForInsert = () => {
+    if (type === 'patients') return validRows.map(r => ({
+      clinic_id: clinic.id,
+      name: normalizeKey(r, 'الاسم الكامل'),
+      phone: String(normalizeKey(r, 'رقم الجوال')),
+      national_id: normalizeKey(r, 'رقم الهوية') || null,
+      date_of_birth: parseDate(normalizeKey(r, 'تاريخ الميلاد')),
+      gender: normalizeKey(r, 'الجنس') || 'male',
+      blood_type: normalizeKey(r, 'فصيلة الدم') || null,
+      allergies: normalizeKey(r, 'الحساسيات') || null,
+      medical_notes: normalizeKey(r, 'ملاحظات طبية') || null,
+      insurance_company: normalizeKey(r, 'شركة التأمين') || null,
+      insurance_policy_no: normalizeKey(r, 'رقم بوليصة التأمين') || null,
+      password: '1111'
+    }))
+
+    if (type === 'income') return validRows.map(r => ({
+      clinic_id: clinic.id,
+      amount: parseFloat(normalizeKey(r, 'المبلغ')) || 0,
+      payment_method: normalizeKey(r, 'طريقة الدفع') || 'cash',
+      paid_at: `${parseDate(normalizeKey(r, 'التاريخ')) || new Date().toISOString().split('T')[0]}T12:00:00`,
+      received_by: user.id,
+      notes: [normalizeKey(r, 'اسم المريض'), normalizeKey(r, 'الخدمة المقدمة'), normalizeKey(r, 'ملاحظات')].filter(Boolean).join(' - ')
+    }))
+
+    if (type === 'expenses') return validRows.map(r => ({
+      clinic_id: clinic.id,
+      description: normalizeKey(r, 'الوصف'),
+      amount: parseFloat(normalizeKey(r, 'المبلغ')) || 0,
+      category: normalizeKey(r, 'نوع المصروف') || 'مصاريف متنوعة',
+      payment_method: normalizeKey(r, 'طريقة الدفع') || 'cash',
+      date: parseDate(normalizeKey(r, 'التاريخ')) || new Date().toISOString().split('T')[0],
+      vendor: normalizeKey(r, 'المورد') || null,
+      notes: normalizeKey(r, 'ملاحظات') || null,
+      created_by: user.id
+    }))
+
+    if (type === 'doctors') return validRows.map(r => ({
+      clinic_id: clinic.id,
+      name: normalizeKey(r, 'الاسم'),
+      specialization: normalizeKey(r, 'التخصص') || null,
+      phone: String(normalizeKey(r, 'الجوال') || ''),
+      email: normalizeKey(r, 'البريد الإلكتروني') || null,
+      username: String(normalizeKey(r, 'اسم المستخدم') || '1111'),
+      password: String(normalizeKey(r, 'كلمة المرور') || '1111'),
+      is_active: true
+    }))
+
+    if (type === 'invoices') return validRows.map(r => {
+      const total = parseFloat(normalizeKey(r, 'المبلغ الإجمالي')) || 0
+      const discount = parseFloat(normalizeKey(r, 'الخصم')) || 0
+      const paid = parseFloat(normalizeKey(r, 'المدفوع')) || 0
+      const remaining = parseFloat(normalizeKey(r, 'المتبقي')) || Math.max(0, total - paid)
+      return {
+        clinic_id: clinic.id,
+        invoice_no: String(normalizeKey(r, 'رقم الفاتورة')),
+        items: String(normalizeKey(r, 'الخدمات') || '').split(',').filter(Boolean).map(x => ({ name: x.trim(), qty: 1, price: 0 })),
+        subtotal: total,
+        discount,
+        total: Math.max(0, total - discount),
+        paid_amount: paid,
+        remaining_amount: remaining,
+        payment_status: remaining <= 0 ? 'paid' : paid > 0 ? 'partial' : 'unpaid',
+        issued_by: user.id,
+        issued_at: `${parseDate(normalizeKey(r, 'التاريخ')) || new Date().toISOString().split('T')[0]}T12:00:00`
+      }
+    })
+
+    return []
+  }
+
+  const saveImport = async () => {
+    if (validRows.length === 0) return alert('لا توجد صفوف سليمة للحفظ')
+    setSaving(true)
+    const payload = mapRowsForInsert()
+    const { error } = await supabase.from(current.table).insert(payload)
+    setSaving(false)
+    if (error) return alert('❌ ' + error.message)
+    alert(`✓ تم حفظ ${payload.length} سجل بنجاح`)
+    setRows([]); setValidRows([]); setErrors([])
+    onDone?.()
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-3xl p-6 shadow-xl border border-sky-100">
+        <div className="flex items-start justify-between gap-4 flex-wrap mb-5">
+          <div>
+            <h3 className="text-2xl font-black text-slate-800 flex items-center gap-2"><FileSpreadsheet className="w-7 h-7 text-sky-600" /> استيراد البيانات القديمة</h3>
+            <p className="text-slate-500 text-sm mt-1">Excel فقط، بدون AI. حمّل القالب، عبّئه، ثم ارفعه للمراجعة قبل الحفظ.</p>
+          </div>
+          <button onClick={downloadTemplate} className="gradient-medical text-white px-5 py-3 rounded-2xl font-bold shadow-lg flex items-center gap-2"><Download className="w-5 h-5" /> تحميل القالب</button>
+        </div>
+
+        <div className="grid md:grid-cols-5 gap-3 mb-5">
+          {Object.entries(templates).map(([key, item]) => (
+            <button key={key} onClick={() => { setType(key); setRows([]); setValidRows([]); setErrors([]) }} className={`p-4 rounded-2xl border-2 text-center font-bold transition ${type === key ? 'gradient-medical text-white border-sky-400 shadow-lg' : 'bg-slate-50 text-slate-700 border-slate-100 hover:border-sky-200'}`}>
+              <FileSpreadsheet className="w-7 h-7 mx-auto mb-2" /> {item.title}
+            </button>
+          ))}
+        </div>
+
+        <label className="upload-zone block rounded-2xl p-8 text-center cursor-pointer">
+          <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFile} className="hidden" />
+          <Upload className="w-12 h-12 mx-auto text-sky-600 mb-3" />
+          <p className="font-black text-slate-800">ارفع ملف Excel للمراجعة</p>
+          <p className="text-xs text-slate-500 mt-1">XLSX / XLS / CSV</p>
+        </label>
+      </div>
+
+      {rows.length > 0 && (
+        <div className="bg-white rounded-3xl p-6 shadow-xl border border-sky-100">
+          <div className="grid grid-cols-3 gap-3 mb-5">
+            <div className="bg-slate-50 rounded-2xl p-4 text-center"><p className="text-3xl font-black text-slate-800">{rows.length}</p><p className="text-xs text-slate-500">إجمالي الصفوف</p></div>
+            <div className="bg-emerald-50 rounded-2xl p-4 text-center"><p className="text-3xl font-black text-emerald-700">{validRows.length}</p><p className="text-xs text-emerald-700">صفوف سليمة</p></div>
+            <div className="bg-red-50 rounded-2xl p-4 text-center"><p className="text-3xl font-black text-red-700">{errors.length}</p><p className="text-xs text-red-700">أخطاء</p></div>
+          </div>
+
+          {errors.length > 0 && (
+            <div className="bg-red-50 border border-red-100 rounded-2xl p-4 mb-5">
+              <p className="font-black text-red-700 mb-2">الأخطاء:</p>
+              <div className="space-y-1 max-h-36 overflow-auto">{errors.map(e => <p key={e.row} className="text-sm text-red-700">صف {e.row}: {e.errors.join('، ')}</p>)}</div>
+            </div>
+          )}
+
+          <div className="overflow-x-auto border border-slate-100 rounded-2xl mb-5">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50"><tr>{current.columns.map(c => <th key={c} className="p-3 text-right whitespace-nowrap">{c}</th>)}</tr></thead>
+              <tbody>
+                {rows.slice(0, 50).map((r, i) => {
+                  const hasError = errors.some(e => e.row === i + 2)
+                  return <tr key={i} className={hasError ? 'bg-red-50' : 'bg-white'}>{current.columns.map(c => <td key={c} className="p-3 border-t border-slate-100 whitespace-nowrap">{String(normalizeKey(r, c) || '')}</td>)}</tr>
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <button onClick={saveImport} disabled={saving || validRows.length === 0} className="w-full py-4 gradient-success text-white rounded-2xl font-black shadow-xl disabled:opacity-50">
+            {saving ? 'جاري الحفظ...' : `حفظ ${validRows.length} سجل سليم`}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
