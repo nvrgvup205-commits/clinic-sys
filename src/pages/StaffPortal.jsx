@@ -13,19 +13,6 @@ import {
   Heart, Receipt
 } from 'lucide-react'
 
-const SAUDI_INSURANCES = [
-  'بوبا العربية',
-  'التعاونية للتأمين',
-  'ميدغلف',
-  'ملاذ للتأمين',
-  'تكافل الراجحي',
-  'أسيج',
-  'الدرع العربي',
-  'سايكو',
-  'الاتحاد للتأمين',
-  'سوليدرتي'
-]
-
 export default function StaffPortal() {
   const { clinicSlug } = useParams()
   const [clinic, setClinic] = useState(null)
@@ -101,6 +88,8 @@ export default function StaffPortal() {
         </>
       )}
       {view === 'admin' && <AdminDashboard user={user} clinic={clinic} onLogout={handleLogout} setClinic={setClinic} />}
+      {view === 'reception' && <ReceptionDashboard user={user} clinic={clinic} onLogout={handleLogout} />}
+      {view === 'accountant' && <AccountantDashboard user={user} clinic={clinic} onLogout={handleLogout} />}
       {view === 'doctor' && <DoctorDashboard user={user} clinic={clinic} onLogout={handleLogout} />}
     </div>
   )
@@ -119,20 +108,27 @@ function StaffLogin({ clinic, onSuccess }) {
   const handleLogin = async (e) => {
     e.preventDefault(); setError(''); setLoading(true)
     try {
-      if (userType === 'admin') {
-        const { data } = await supabase.from('admin_users').select('*')
-          .eq('clinic_id', clinic.id).eq('username', credentials.username.trim())
-          .eq('password', credentials.password).in('role', ['clinic_admin', 'super_admin', 'receptionist', 'accountant']).limit(1)
-        if (data?.length > 0) onSuccess(data[0], 'admin')
-        else setError('❌ بيانات الدخول غير صحيحة')
-      } else {
+      if (userType === 'doctor') {
         const { data } = await supabase.from('doctors').select('*')
           .eq('clinic_id', clinic.id).eq('username', credentials.username.trim())
-          .eq('password', credentials.password).limit(1)
+          .eq('password', credentials.password).eq('is_active', true).limit(1)
         if (data?.length > 0) onSuccess(data[0], 'doctor')
         else setError('❌ بيانات الدخول غير صحيحة')
+      } else {
+        const allowedRoles = {
+          admin: ['clinic_admin', 'super_admin'],
+          reception: ['receptionist'],
+          accountant: ['accountant'],
+        }[userType]
+
+        const { data } = await supabase.from('admin_users').select('*')
+          .eq('clinic_id', clinic.id).eq('username', credentials.username.trim())
+          .eq('password', credentials.password).in('role', allowedRoles).eq('is_active', true).limit(1)
+
+        if (data?.length > 0) onSuccess(data[0], userType)
+        else setError('❌ بيانات الدخول غير صحيحة أو الدور غير مفعّل')
       }
-    } catch (err) { setError('❌ حصل خطأ') }
+    } catch (err) { setError('❌ صار خطأ') }
     finally { setLoading(false) }
   }
 
@@ -156,14 +152,17 @@ function StaffLogin({ clinic, onSuccess }) {
 
         <div className="glass-dark rounded-3xl p-8 shadow-2xl animate-slide-up">
           <div className="grid grid-cols-2 gap-2 mb-6 bg-white/5 p-1.5 rounded-2xl">
-            <button onClick={() => setUserType('admin')}
-              className={`py-3 rounded-xl font-bold transition ${userType === 'admin' ? 'gradient-medical text-white shadow-lg' : 'text-white/70 hover:text-white'}`}>
-              <Settings className="w-4 h-4 inline mr-1" /> أدمن
-            </button>
-            <button onClick={() => setUserType('doctor')}
-              className={`py-3 rounded-xl font-bold transition ${userType === 'doctor' ? 'gradient-success text-white shadow-lg' : 'text-white/70 hover:text-white'}`}>
-              <Stethoscope className="w-4 h-4 inline mr-1" /> دكتور
-            </button>
+            {[
+              { id: 'admin', label: 'أدمن', icon: Settings, activeClass: 'gradient-medical' },
+              { id: 'reception', label: 'استقبال', icon: Users, activeClass: 'gradient-warning' },
+              { id: 'accountant', label: 'محاسب', icon: DollarSign, activeClass: 'gradient-purple' },
+              { id: 'doctor', label: 'دكتور', icon: Stethoscope, activeClass: 'gradient-success' },
+            ].map(t => (
+              <button key={t.id} type="button" onClick={() => setUserType(t.id)}
+                className={`py-3 rounded-xl font-bold transition ${userType === t.id ? `${t.activeClass} text-white shadow-lg` : 'text-white/70 hover:text-white'}`}>
+                <t.icon className="w-4 h-4 inline mr-1" /> {t.label}
+              </button>
+            ))}
           </div>
 
           <form onSubmit={handleLogin} className="space-y-4">
@@ -172,7 +171,7 @@ function StaffLogin({ clinic, onSuccess }) {
               <div className="relative">
                 <User className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/50" />
                 <input type="text" value={credentials.username} onChange={(e) => setCredentials({...credentials, username: e.target.value})}
-                  placeholder={userType === 'admin' ? 'admin' : 'doctor'} required
+                  placeholder='1111' required
                   className="w-full pr-12 pl-4 py-4 bg-white/10 border-2 border-white/20 rounded-2xl text-white placeholder-white/40 text-right focus:border-sky-400 outline-none transition font-medium" />
               </div>
             </div>
@@ -192,7 +191,7 @@ function StaffLogin({ clinic, onSuccess }) {
             {error && <div className="bg-red-500/20 border-2 border-red-500/40 text-red-200 p-4 rounded-2xl text-sm font-medium animate-fade-in">{error}</div>}
 
             <button type="submit" disabled={loading}
-              className={`w-full py-4 text-white font-bold rounded-2xl btn-medical disabled:opacity-50 shadow-xl text-lg ${userType === 'admin' ? 'gradient-medical' : 'gradient-success'}`}>
+              className={`w-full py-4 text-white font-bold rounded-2xl btn-medical disabled:opacity-50 shadow-xl text-lg ${userType === 'doctor' ? 'gradient-success' : userType === 'reception' ? 'gradient-warning' : userType === 'accountant' ? 'gradient-purple' : 'gradient-medical'}`}>
               {loading ? '⏳ جاري الدخول...' : 'دخول'}
             </button>
           </form>
@@ -214,27 +213,6 @@ function StaffLogin({ clinic, onSuccess }) {
 function AdminDashboard({ user, clinic, onLogout, setClinic }) {
   const [tab, setTab] = useState('dashboard')
   const [stats, setStats] = useState({ patients: 0, doctors: 0, todayAppts: 0, openComplaints: 0, totalRevenue: 0, monthRevenue: 0 })
-  
-  // نظام تسجيل الحضور والانصراف للموظفين
-  const [clockedIn, setClockedIn] = useState(() => localStorage.getItem(`clock_status_${user.id}`) === 'true')
-  const [clockTime, setClockTime] = useState(() => localStorage.getItem(`clock_time_${user.id}`) || '')
-
-  const handleClockInOut = () => {
-    if (!clockedIn) {
-      const nowStr = new Date().toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' })
-      setClockedIn(true)
-      setClockTime(nowStr)
-      localStorage.setItem(`clock_status_${user.id}`, 'true')
-      localStorage.setItem(`clock_time_${user.id}`, nowStr)
-      alert('🌅 تم تسجيل حضورك بنجاح! يوم سعيد وموفق في خدمة مرضانا.')
-    } else {
-      setClockedIn(false)
-      setClockTime('')
-      localStorage.removeItem(`clock_status_${user.id}`)
-      localStorage.removeItem(`clock_time_${user.id}`)
-      alert('🌇 تم تسجيل انصرافك بنجاح! نستودعك الله ورافقتك السلامة.')
-    }
-  }
   const [patients, setPatients] = useState([])
   const [doctors, setDoctors] = useState([])
   const [appointments, setAppointments] = useState([])
@@ -333,21 +311,16 @@ function AdminDashboard({ user, clinic, onLogout, setClinic }) {
 
           <div className="flex gap-2 mt-5 overflow-x-auto pb-1">
             {[
-              { id: 'dashboard', label: 'شاشة الاستقبال', icon: BarChart3, roles: ['clinic_admin', 'super_admin', 'receptionist'] },
-              { id: 'accounts', label: 'الحسابات والمصروفات', icon: Receipt, roles: ['clinic_admin', 'super_admin', 'accountant'] },
-              { id: 'reports', label: 'التقارير المالية', icon: TrendingUp, roles: ['clinic_admin', 'super_admin', 'accountant'] },
-              { id: 'excel_import', label: 'استيراد Excel', icon: FileText, roles: ['clinic_admin', 'super_admin', 'accountant'] },
-              { id: 'integrations', label: 'ربط الخدمات الخارجية', icon: Globe, roles: ['clinic_admin', 'super_admin'] },
-              { id: 'patients', label: 'المرضى', icon: Users, roles: ['clinic_admin', 'super_admin', 'receptionist'] },
-              { id: 'doctors', label: 'الأطباء', icon: Stethoscope, roles: ['clinic_admin', 'super_admin'] },
-              { id: 'appointments', label: 'إدارة المواعيد', icon: Calendar, roles: ['clinic_admin', 'super_admin', 'receptionist'] },
-              { id: 'schedules', label: 'جداول الأطباء', icon: Clock, roles: ['clinic_admin', 'super_admin'] },
-              { id: 'services', label: 'إدارة الخدمات والأسعار', icon: DollarSign, roles: ['clinic_admin', 'super_admin'] },
-              { id: 'complaints', label: 'الشكاوى والاستفسارات', icon: AlertCircle, roles: ['clinic_admin', 'super_admin', 'receptionist'] },
-              { id: 'settings', label: 'إعدادات العيادة', icon: Settings, roles: ['clinic_admin', 'super_admin'] },
-            ]
-            .filter(t => t.roles.includes(user.role || 'clinic_admin'))
-            .map(t => (
+              { id: 'dashboard', label: 'الرئيسية', icon: BarChart3 },
+              { id: 'reports', label: 'التقارير', icon: TrendingUp },
+              { id: 'patients', label: 'المرضى', icon: Users },
+              { id: 'doctors', label: 'الأطباء', icon: Stethoscope },
+              { id: 'appointments', label: 'المواعيد', icon: Calendar },
+              { id: 'schedules', label: 'جداول الأطباء', icon: Clock },
+              { id: 'services', label: 'الخدمات', icon: DollarSign },
+              { id: 'complaints', label: 'الشكاوى', icon: AlertCircle },
+              { id: 'settings', label: 'إعدادات', icon: Settings },
+            ].map(t => (
               <button key={t.id} onClick={() => setTab(t.id)}
                 className={`px-4 py-2 rounded-xl font-bold text-sm whitespace-nowrap transition flex items-center gap-1.5 ${tab === t.id ? 'bg-white text-sky-600 shadow-lg' : 'text-white/80 hover:bg-white/10'}`}>
                 <t.icon className="w-4 h-4" />
@@ -359,10 +332,7 @@ function AdminDashboard({ user, clinic, onLogout, setClinic }) {
       </header>
 
       <div className="max-w-7xl mx-auto p-4 sm:p-6">
-        {tab === 'dashboard' && <DashTab stats={stats} appointments={appointments} setTab={setTab} clockedIn={clockedIn} clockTime={clockTime} onClockInOut={handleClockInOut} user={user} />}
-        {tab === 'accounts' && <AccountsDashboardTab records={records} services={services} doctors={doctors} clinic={clinic} appointments={appointments} patients={patients} />}
-        {tab === 'excel_import' && <ExcelImportTab clinic={clinic} onRefresh={loadAll} />}
-        {tab === 'integrations' && <IntegrationsTab clinic={clinic} />}
+        {tab === 'dashboard' && <DashTab stats={stats} appointments={appointments} setTab={setTab} />}
         {tab === 'reports' && <ReportsTab appointments={appointments} records={records} patients={patients} doctors={doctors} />}
         {tab === 'patients' && <PatientsTab patients={patients} clinic={clinic} />}
         {tab === 'doctors' && <DoctorsTab doctors={doctors} clinic={clinic} />}
@@ -376,16 +346,7 @@ function AdminDashboard({ user, clinic, onLogout, setClinic }) {
   )
 }
 
-function DashTab({ stats, appointments, setTab, clockedIn, clockTime, onClockInOut, user }) {
-  // تصفية المواعيد المعلقة لليوم لتسهيل تأكيدها من موظف الاستقبال
-  const todayStr = new Date().toISOString().split('T')[0]
-  const pendingToday = appointments.filter(a => a.appointment_date === todayStr && a.status === 'pending')
-
-  const confirmAppt = async (id) => {
-    const { error } = await supabase.from('appointments').update({ status: 'confirmed' }).eq('id', id)
-    if (error) alert('❌ فشل التأكيد: ' + error.message)
-    else alert('✅ تم تأكيد الموعد بنجاح ومزامنة الجدول مع الطبيب!')
-  }
+function DashTab({ stats, appointments, setTab }) {
   const today = new Date().toISOString().split('T')[0]
   const todayAppts = appointments.filter(a => a.appointment_date === today)
   return (
@@ -484,7 +445,7 @@ function ReportsTab({ appointments, records, patients, doctors }) {
 
   const exportCSV = () => {
     const rows = [['الاسم', 'الجوال', 'تاريخ التسجيل']]
-    patients.forEach(p => rows.push([p.name, p.phone, new Date(p.created_at).toLocaleDateString('ar-EG')]))
+    patients.forEach(p => rows.push([p.name, p.phone, new Date(p.created_at).toLocaleDateString('ar-SA')]))
     const csv = rows.map(r => r.join(',')).join('\n')
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
@@ -609,7 +570,7 @@ function PatientsTab({ patients, clinic }) {
   const [search, setSearch] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState(null)
-  const [form, setForm] = useState({ name: '', phone: '', national_id: '', gender: 'male', password: '123456', insurance_company: '', insurance_policy_no: '' })
+  const [form, setForm] = useState({ name: '', phone: '', national_id: '', gender: 'male', password: '123456' })
 
   const filtered = patients.filter(p =>
     p.name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -618,7 +579,7 @@ function PatientsTab({ patients, clinic }) {
 
   const startEdit = (p) => {
     setEditing(p)
-    setForm({ name: p.name, phone: p.phone, national_id: p.national_id || '', gender: p.gender || 'male', password: p.password, insurance_company: p.insurance_company || '', insurance_policy_no: p.insurance_policy_no || '' })
+    setForm({ name: p.name, phone: p.phone, national_id: p.national_id || '', gender: p.gender || 'male', password: p.password })
     setShowForm(true)
   }
 
@@ -631,7 +592,7 @@ function PatientsTab({ patients, clinic }) {
       const { error } = await supabase.from('patients').insert([{ ...form, clinic_id: clinic.id }])
       if (error) return alert('❌ ' + error.message)
     }
-    setForm({ name: '', phone: '', national_id: '', gender: 'male', password: '123456', insurance_company: '', insurance_policy_no: '' })
+    setForm({ name: '', phone: '', national_id: '', gender: 'male', password: '123456' })
     setShowForm(false); setEditing(null)
   }
 
@@ -644,7 +605,7 @@ function PatientsTab({ patients, clinic }) {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
         <h2 className="text-3xl font-black text-slate-800 flex items-center gap-2"><Users className="w-8 h-8 text-sky-600" /> المرضى</h2>
-        <button onClick={() => { setShowForm(!showForm); setEditing(null); setForm({ name: '', phone: '', national_id: '', gender: 'male', password: '123456', insurance_company: '', insurance_policy_no: '' }) }}
+        <button onClick={() => { setShowForm(!showForm); setEditing(null); setForm({ name: '', phone: '', national_id: '', gender: 'male', password: '123456' }) }}
           className="gradient-medical text-white px-5 py-3 rounded-2xl font-bold shadow-xl btn-medical flex items-center gap-2">
           <Plus className="w-5 h-5" /> {showForm ? 'إلغاء' : 'مريض جديد'}
         </button>
@@ -661,25 +622,6 @@ function PatientsTab({ patients, clinic }) {
               <option value="male">ذكر</option><option value="female">أنثى</option>
             </select>
             <input placeholder="كلمة المرور" value={form.password} onChange={(e) => setForm({...form, password: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none md:col-span-2" />
-            
-            <div className="md:col-span-2 grid md:grid-cols-2 gap-4">
-              <div className="flex flex-col">
-                <label className="text-sm font-bold text-slate-700 mb-1">شركة التأمين (اختياري)</label>
-                <select value={form.insurance_company} onChange={(e) => setForm({...form, insurance_company: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none">
-                  <option value="">لا يوجد تأمين صحي</option>
-                  {SAUDI_INSURANCES.map(ins => (
-                    <option key={ins} value={ins}>{ins}</option>
-                  ))}
-                </select>
-              </div>
-
-              {form.insurance_company && (
-                <div className="flex flex-col">
-                  <label className="text-sm font-bold text-slate-700 mb-1">رقم بوليصة التأمين</label>
-                  <input placeholder="رقم البوليصة" value={form.insurance_policy_no} onChange={(e) => setForm({...form, insurance_policy_no: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" />
-                </div>
-              )}
-            </div>
             <button type="submit" className="md:col-span-2 py-3 gradient-success text-white rounded-xl font-bold shadow-lg">
               {editing ? '💾 حفظ' : '✅ إضافة'}
             </button>
@@ -709,11 +651,6 @@ function PatientsTab({ patients, clinic }) {
                       <p className="font-bold text-slate-800">{p.name}</p>
                       <p className="text-sm text-slate-600 flex items-center gap-1"><Phone className="w-3 h-3" /> {p.phone}</p>
                       {p.national_id && <p className="text-xs text-slate-500 flex items-center gap-1"><CreditCard className="w-3 h-3" /> {p.national_id}</p>}
-                      {p.insurance_company && (
-                        <p className="text-xs text-indigo-600 font-bold flex items-center gap-1 mt-1">
-                          <ShieldCheck className="w-3 h-3" /> تأمين: {p.insurance_company} ({p.insurance_policy_no || 'بدون رقم بوليصة'})
-                        </p>
-                      )}
                     </div>
                   </div>
                   <div className="flex gap-2">
@@ -788,25 +725,6 @@ function DoctorsTab({ doctors, clinic }) {
               <input placeholder="رقم الجوال" value={form.phone} onChange={(e) => setForm({...form, phone: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" />
               <input required placeholder="اسم المستخدم *" value={form.username} onChange={(e) => setForm({...form, username: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" />
               <input placeholder="كلمة المرور" value={form.password} onChange={(e) => setForm({...form, password: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none md:col-span-2" />
-            
-            <div className="md:col-span-2 grid md:grid-cols-2 gap-4">
-              <div className="flex flex-col">
-                <label className="text-sm font-bold text-slate-700 mb-1">شركة التأمين (اختياري)</label>
-                <select value={form.insurance_company} onChange={(e) => setForm({...form, insurance_company: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none">
-                  <option value="">لا يوجد تأمين صحي</option>
-                  {SAUDI_INSURANCES.map(ins => (
-                    <option key={ins} value={ins}>{ins}</option>
-                  ))}
-                </select>
-              </div>
-
-              {form.insurance_company && (
-                <div className="flex flex-col">
-                  <label className="text-sm font-bold text-slate-700 mb-1">رقم بوليصة التأمين</label>
-                  <input placeholder="رقم البوليصة" value={form.insurance_policy_no} onChange={(e) => setForm({...form, insurance_policy_no: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" />
-                </div>
-              )}
-            </div>
             </div>
             <button type="submit" className="w-full py-3 gradient-success text-white rounded-xl font-bold shadow-lg">
               {editing ? '💾 حفظ' : '✅ إضافة الطبيب'}
@@ -916,7 +834,7 @@ function ScheduleEditor({ doctor, clinic }) {
   }
 
   const saveAll = async () => {
-    if (schedules.length === 0) return alert('⚠️ اختار يوم واحد على الأقل')
+    if (schedules.length === 0) return alert('⚠️ اختر يوم واحد على الأقل')
     setLoading(true)
     await supabase.from('doctor_schedules').delete().eq('doctor_id', doctor.id)
     const toInsert = schedules.map(s => ({
@@ -1000,11 +918,11 @@ function ScheduleEditor({ doctor, clinic }) {
 function ServicesTab({ services, clinic }) {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState(null)
-  const [form, setForm] = useState({ name: '', description: '', price: 0, duration_minutes: 30, insurance_price: 0, discount_pct: 0 })
+  const [form, setForm] = useState({ name: '', description: '', price: 0, duration_minutes: 30 })
 
   const startEdit = (s) => {
     setEditing(s)
-    setForm({ name: s.name, description: s.description || '', price: s.price, duration_minutes: s.duration_minutes, insurance_price: s.insurance_price || 0, discount_pct: s.discount_pct || 0 })
+    setForm({ name: s.name, description: s.description || '', price: s.price, duration_minutes: s.duration_minutes })
     setShowForm(true)
   }
 
@@ -1017,7 +935,7 @@ function ServicesTab({ services, clinic }) {
       const { error } = await supabase.from('clinic_services').insert([{ ...form, clinic_id: clinic.id }])
       if (error) return alert('❌ ' + error.message)
     }
-    setForm({ name: '', description: '', price: 0, duration_minutes: 30, insurance_price: 0, discount_pct: 0 })
+    setForm({ name: '', description: '', price: 0, duration_minutes: 30 })
     setShowForm(false); setEditing(null)
     window.location.reload()
   }
@@ -1032,7 +950,7 @@ function ServicesTab({ services, clinic }) {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
         <h2 className="text-3xl font-black text-slate-800 flex items-center gap-2"><DollarSign className="w-8 h-8 text-amber-600" /> الخدمات</h2>
-        <button onClick={() => { setShowForm(!showForm); setEditing(null); setForm({ name: '', description: '', price: 0, duration_minutes: 30, insurance_price: 0, discount_pct: 0 }) }}
+        <button onClick={() => { setShowForm(!showForm); setEditing(null); setForm({ name: '', description: '', price: 0, duration_minutes: 30 }) }}
           className="gradient-warning text-white px-5 py-3 rounded-2xl font-bold shadow-xl btn-medical flex items-center gap-2">
           <Plus className="w-5 h-5" /> {showForm ? 'إلغاء' : 'خدمة جديدة'}
         </button>
@@ -1043,32 +961,9 @@ function ServicesTab({ services, clinic }) {
           <h3 className="text-xl font-bold mb-4 text-slate-800">{editing ? '✏️ تعديل' : '➕ خدمة جديدة'}</h3>
           <form onSubmit={submit} className="grid md:grid-cols-2 gap-4">
             <input required placeholder="اسم الخدمة *" value={form.name} onChange={(e) => setForm({...form, name: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none md:col-span-2" />
-            <div className="flex flex-col">
-              <label className="text-xs font-bold text-slate-600 mb-1">السعر العادي (ر.س) *</label>
-              <input type="number" required placeholder="السعر العادي *" value={form.price} onChange={(e) => setForm({...form, price: parseFloat(e.target.value) || 0})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none w-full" />
-            </div>
-            
-            <div className="flex flex-col">
-              <label className="text-xs font-bold text-slate-600 mb-1">سعر التأمين (ر.س)</label>
-              <input type="number" placeholder="سعر التأمين" value={form.insurance_price} onChange={(e) => setForm({...form, insurance_price: parseFloat(e.target.value) || 0})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none w-full" />
-            </div>
-
-            <div className="flex flex-col">
-              <label className="text-xs font-bold text-slate-600 mb-1">نسبة الخصم (%)</label>
-              <input type="number" min="0" max="100" placeholder="نسبة الخصم" value={form.discount_pct} onChange={(e) => setForm({...form, discount_pct: parseFloat(e.target.value) || 0})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none w-full" />
-            </div>
+            <input type="number" required placeholder="السعر *" value={form.price} onChange={(e) => setForm({...form, price: parseFloat(e.target.value) || 0})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" />
             <input type="number" required placeholder="المدة (دقيقة)" value={form.duration_minutes} onChange={(e) => setForm({...form, duration_minutes: parseInt(e.target.value) || 30})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" />
             <textarea placeholder="الوصف" value={form.description} onChange={(e) => setForm({...form, description: e.target.value})} rows="2" className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none md:col-span-2 resize-none" />
-            
-            <div className="md:col-span-2 bg-slate-50 p-4 rounded-xl text-sm space-y-2 border border-slate-100">
-              <p className="flex justify-between font-medium"><span>💵 السعر العادي:</span> <span>{form.price} ر.س</span></p>
-              <p className="flex justify-between font-medium text-indigo-600"><span>🏥 سعر التأمين:</span> <span>{form.insurance_price || 0} ر.س</span></p>
-              <p className="flex justify-between font-medium text-emerald-600"><span>🏷️ نسبة الخصم:</span> <span>{form.discount_pct || 0}%</span></p>
-              <p className="flex justify-between font-bold text-slate-800 border-t pt-1">
-                <span>💰 الصافي المتبقي بعد الخصم:</span>
-                <span className="text-emerald-600">{(form.price - (form.price * (form.discount_pct || 0) / 100)).toFixed(0)} ر.س</span>
-              </p>
-            </div>
             <button type="submit" className="md:col-span-2 py-3 gradient-warning text-white rounded-xl font-bold shadow-lg">{editing ? '💾 حفظ' : '✅ إضافة'}</button>
           </form>
         </div>
@@ -1315,63 +1210,7 @@ function DoctorDashboard({ user, clinic, onLogout }) {
   const [doctorTab, setDoctorTab] = useState('patients')
   const [notification, setNotification] = useState(null)
 
-  // حالات تأجيل وإلغاء المواعيد بواسطة الطبيب
-  const [reschedulingApt, setReschedulingApt] = useState(null)
-  const [rescheduleDate, setRescheduleDate] = useState('')
-  const [rescheduleTime, setRescheduleTime] = useState('')
-  const [rescheduleReason, setRescheduleReason] = useState('')
-  
-  const [cancellingApt, setCancellingApt] = useState(null)
-  const [cancelReason, setCancelReason] = useState('')
-
   useEffect(() => { load() }, [])
-
-  const handleReschedule = async () => {
-    if (!reschedulingApt || !rescheduleDate || !rescheduleTime) {
-      alert('❌ يرجى اختيار تاريخ ووقت التأجيل الجديدين')
-      return
-    }
-    const { error } = await supabase
-      .from('appointments')
-      .update({
-        appointment_date: rescheduleDate,
-        appointment_time: rescheduleTime,
-        notes: rescheduleReason ? `تم تأجيل الموعد بواسطة الطبيب: ${rescheduleReason}` : 'تم تأجيل الموعد بواسطة الطبيب',
-        status: 'pending' // إعادة تفعيل الموعد كـ معلق للتأكيد
-      })
-      .eq('id', reschedulingApt.id)
-    
-    if (error) {
-      alert('❌ فشل التأجيل: ' + error.message)
-    } else {
-      alert('✅ تم تأجيل الموعد وإشعار المريض فورا!')
-      setReschedulingApt(null)
-      setRescheduleDate('')
-      setRescheduleTime('')
-      setRescheduleReason('')
-      load()
-    }
-  }
-
-  const handleCancel = async () => {
-    if (!cancellingApt) return
-    const { error } = await supabase
-      .from('appointments')
-      .update({
-        status: 'cancelled',
-        notes: cancelReason ? `تم إلغاء الموعد بواسطة الطبيب: ${cancelReason}` : 'تم إلغاء الموعد بواسطة الطبيب'
-      })
-      .eq('id', cancellingApt.id)
-    
-    if (error) {
-      alert('❌ فشل الإلغاء: ' + error.message)
-    } else {
-      alert('✅ تم إلغاء الموعد بنجاح!')
-      setCancellingApt(null)
-      setCancelReason('')
-      load()
-    }
-  }
 
   // 🔴 Realtime
   useRealtime('appointments', (payload) => {
@@ -1394,19 +1233,16 @@ function DoctorDashboard({ user, clinic, onLogout }) {
     setLoading(false)
   }
 
-  // استبعاد المواعيد الملغية والمكتملة من العرض الافتراضي
-  const activeAppointments = appointments.filter(a => a.status !== 'cancelled')
-
-  const filtered = activeAppointments.filter(apt => {
+  const filtered = appointments.filter(apt => {
     const matchSearch = !search || apt.patients?.name?.toLowerCase().includes(search.toLowerCase()) ||
       apt.patients?.phone?.includes(search) || apt.patients?.national_id?.includes(search)
     const matchFilter = filter === 'all' || apt.type === filter
     return matchSearch && matchFilter
   })
 
-  const firstVisits = activeAppointments.filter(a => a.type === 'first_visit')
-  const emergencies = activeAppointments.filter(a => a.type === 'emergency')
-  const followUps = activeAppointments.filter(a => a.type === 'follow_up')
+  const firstVisits = appointments.filter(a => a.type === 'first_visit')
+  const emergencies = appointments.filter(a => a.type === 'emergency')
+  const followUps = appointments.filter(a => a.type === 'follow_up')
 
   if (examiningApt) {
     return <ExaminationView apt={examiningApt} clinic={clinic} services={services} doctor={user} onClose={() => { setExaminingApt(null); load() }} />
@@ -1458,60 +1294,6 @@ function DoctorDashboard({ user, clinic, onLogout }) {
           </div>
         </div>
       </header>
-
-      {/* مودال تأجيل الموعد (Reschedule Modal) */}
-      {reschedulingApt && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white rounded-3xl p-6 shadow-2xl w-full max-w-md animate-slide-up space-y-4">
-            <h3 className="text-2xl font-black text-slate-800 flex items-center gap-2">
-              <Calendar className="w-7 h-7 text-sky-600" /> تأجيل موعد المريض
-            </h3>
-            <p className="text-slate-600 text-sm">تأجيل موعد المريض: <span className="font-bold text-slate-800">{reschedulingApt.patients?.name}</span></p>
-            
-            <div className="space-y-3">
-              <div className="flex flex-col">
-                <label className="text-xs font-bold text-slate-600 mb-1">التاريخ الجديد</label>
-                <input type="date" value={rescheduleDate} onChange={(e) => setRescheduleDate(e.target.value)} className="px-4 py-3 border-2 border-slate-200 rounded-xl outline-none" />
-              </div>
-              <div className="flex flex-col">
-                <label className="text-xs font-bold text-slate-600 mb-1">الوقت الجديد</label>
-                <input type="time" value={rescheduleTime} onChange={(e) => setRescheduleTime(e.target.value)} className="px-4 py-3 border-2 border-slate-200 rounded-xl outline-none" />
-              </div>
-              <div className="flex flex-col">
-                <label className="text-xs font-bold text-slate-600 mb-1">سبب التأجيل</label>
-                <textarea placeholder="اكتب سبب التأجيل..." value={rescheduleReason} onChange={(e) => setRescheduleReason(e.target.value)} rows="2" className="px-4 py-3 border-2 border-slate-200 rounded-xl outline-none resize-none" />
-              </div>
-            </div>
-
-            <div className="flex gap-2 pt-2">
-              <button onClick={handleReschedule} className="flex-1 py-3 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl shadow-lg transition">تأكيد التأجيل</button>
-              <button onClick={() => setReschedulingApt(null)} className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition">إلغاء</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* مودال إلغاء الموعد (Cancel Modal) */}
-      {cancellingApt && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white rounded-3xl p-6 shadow-2xl w-full max-w-md animate-slide-up space-y-4">
-            <h3 className="text-2xl font-black text-slate-800 flex items-center gap-2">
-              <XCircle className="w-7 h-7 text-red-500" /> إلغاء الموعد نهائياً
-            </h3>
-            <p className="text-slate-600 text-sm">هل أنت متأكد من إلغاء موعد المريض: <span className="font-bold text-red-600">{cancellingApt.patients?.name}</span>؟</p>
-            
-            <div className="flex flex-col">
-              <label className="text-xs font-bold text-slate-600 mb-1">سبب الإلغاء</label>
-              <textarea placeholder="اكتب سبب الإلغاء هنا..." value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} rows="3" className="px-4 py-3 border-2 border-slate-200 rounded-xl outline-none resize-none" />
-            </div>
-
-            <div className="flex gap-2 pt-2">
-              <button onClick={handleCancel} className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-lg transition">تأكيد الإلغاء</button>
-              <button onClick={() => setCancellingApt(null)} className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition">تراجع</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {doctorTab === 'schedule' ? (
         <div className="max-w-7xl mx-auto p-4 sm:p-6">
@@ -1579,18 +1361,10 @@ function DoctorDashboard({ user, clinic, onLogout }) {
                         </span>
                       </div>
                     </div>
-                    <div className="mt-3 pt-3 border-t border-slate-200 flex flex-wrap gap-2">
+                    <div className="mt-3 pt-3 border-t border-slate-200">
                       <button onClick={() => setExaminingApt(apt)}
                         className="gradient-success text-white px-4 py-2 rounded-xl font-bold text-sm shadow-lg btn-medical flex items-center gap-2">
                         <Stethoscope className="w-4 h-4" /> {apt.medical_records?.length > 0 ? 'تعديل الكشف' : 'بدء الكشف'}
-                      </button>
-                      <button onClick={() => { setReschedulingApt(apt); setRescheduleDate(apt.appointment_date); setRescheduleTime(apt.appointment_time) }}
-                        className="bg-sky-500 hover:bg-sky-600 text-white px-4 py-2 rounded-xl font-bold text-sm shadow-lg btn-medical flex items-center gap-2 transition">
-                        <Calendar className="w-4 h-4" /> تأجيل الموعد
-                      </button>
-                      <button onClick={() => setCancellingApt(apt)}
-                        className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl font-bold text-sm shadow-lg btn-medical flex items-center gap-2 transition">
-                        <XCircle className="w-4 h-4" /> إلغاء الموعد
                       </button>
                     </div>
                   </div>
@@ -1629,33 +1403,9 @@ function ExaminationView({ apt, clinic, services, doctor, onClose }) {
   const paymentStatus = parseFloat(form.paid_amount) >= finalTotal ? 'paid' : parseFloat(form.paid_amount) > 0 ? 'partial' : 'unpaid'
 
   const addService = (s) => {
-    const isInsured = !!apt.patients?.insurance_company
-    // إذا كان المريض مؤمناً، نستخدم سعر التأمين إن وُجد، وإلا السعر العادي
-    const basePrice = isInsured && s.insurance_price && s.insurance_price > 0 ? s.insurance_price : s.price
-    // حساب قيمة الخصم بناءً على نسبة الخصم للخدمة إن وُجدت
-    const discountAmount = s.discount_pct && s.discount_pct > 0 ? (basePrice * s.discount_pct / 100) : 0
-    const finalPrice = basePrice - discountAmount
-
     const existing = form.services_provided.find(x => x.id === s.id)
-    if (existing) {
-      setForm({
-        ...form, 
-        services_provided: form.services_provided.map(x => x.id === s.id ? {...x, qty: x.qty + 1} : x)
-      })
-    } else {
-      setForm({
-        ...form, 
-        services_provided: [...form.services_provided, {
-          id: s.id, 
-          name: s.name, 
-          price: finalPrice, 
-          original_price: s.price,
-          insurance_price: s.insurance_price || 0,
-          discount_pct: s.discount_pct || 0,
-          qty: 1
-        }]
-      })
-    }
+    if (existing) setForm({...form, services_provided: form.services_provided.map(x => x.id === s.id ? {...x, qty: x.qty + 1} : x)})
+    else setForm({...form, services_provided: [...form.services_provided, {id: s.id, name: s.name, price: s.price, qty: 1}]})
   }
 
   const removeService = (id) => setForm({...form, services_provided: form.services_provided.filter(s => s.id !== id)})
@@ -1871,587 +1621,486 @@ function ExaminationView({ apt, clinic, services, doctor, onClose }) {
   )
 }
 
-
 // ═══════════════════════════════════════════════════════════
-// AccountsDashboardTab - داشبورد الحسابات والمصروفات والأرباح (المرحلتان 11 و 12)
+// Reception Dashboard - شاشة الاستقبال
 // ═══════════════════════════════════════════════════════════
-function AccountsDashboardTab({ records, services, doctors, clinic, appointments, patients }) {
-  const [expenses, setExpenses] = useState([])
-  const [showExpenseForm, setShowExpenseForm] = useState(false)
-  const [expenseForm, setExpenseForm] = useState({
-    description: '', amount: '', category: 'supplies', payment_method: 'cash', date: new Date().toISOString().split('T')[0]
-  })
-  const [expenseFilter, setExpenseFilter] = useState('all')
+function ReceptionDashboard({ user, clinic, onLogout }) {
+  const [tab, setTab] = useState('dashboard')
+  const [appointments, setAppointments] = useState([])
+  const [complaints, setComplaints] = useState([])
+  const [emergencies, setEmergencies] = useState([])
+  const [payments, setPayments] = useState([])
+  const [attendance, setAttendance] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [notification, setNotification] = useState(null)
 
-  useEffect(() => {
-    loadExpenses()
-  }, [])
+  useEffect(() => { loadReceptionData() }, [])
 
-  const loadExpenses = async () => {
-    try {
-      const { data, error } = await supabase.from('expenses').select('*').eq('clinic_id', clinic.id).order('date', { ascending: false })
-      if (!error && data) {
-        setExpenses(data)
-      } else {
-        const local = localStorage.getItem(`hulool_expenses_${clinic.id}`)
-        if (local) setExpenses(JSON.parse(local))
+  useRealtime('appointments', (payload) => {
+    if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) {
+      loadReceptionData()
+      if (payload.eventType === 'INSERT') {
+        setNotification('🆕 حجز جديد وصل للاستقبال')
+        setTimeout(() => setNotification(null), 5000)
       }
-    } catch (e) {
-      const local = localStorage.getItem(`hulool_expenses_${clinic.id}`)
-      if (local) setExpenses(JSON.parse(local))
     }
-  }
+  }, { column: 'clinic_id', value: clinic.id })
 
-  const handleAddExpense = async (e) => {
-    e.preventDefault()
-    if (!expenseForm.description || !expenseForm.amount) return
-
-    const newExp = {
-      description: expenseForm.description.trim(),
-      amount: parseFloat(expenseForm.amount) || 0,
-      category: expenseForm.category,
-      payment_method: expenseForm.payment_method,
-      date: expenseForm.date,
-      clinic_id: clinic.id
-    }
-
-    try {
-      const { data, error } = await supabase.from('expenses').insert([newExp]).select()
-      if (!error && data && data.length > 0) {
-        setExpenses([data[0], ...expenses])
-      } else {
-        const localExp = [ { ...newExp, id: 'local-' + Date.now() }, ...expenses ]
-        setExpenses(localExp)
-        localStorage.setItem(`hulool_expenses_${clinic.id}`, JSON.stringify(localExp))
+  useRealtime('emergency_requests', (payload) => {
+    if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) {
+      loadReceptionData()
+      if (payload.eventType === 'INSERT') {
+        setNotification('🚨 طلب طوارئ جديد')
+        setTimeout(() => setNotification(null), 5000)
       }
-    } catch (err) {
-      const localExp = [ { ...newExp, id: 'local-' + Date.now() }, ...expenses ]
-      setExpenses(localExp)
-      localStorage.setItem(`hulool_expenses_${clinic.id}`, JSON.stringify(localExp))
     }
+  }, { column: 'clinic_id', value: clinic.id })
 
-    setExpenseForm({
-      description: '', amount: '', category: 'supplies', payment_method: 'cash', date: new Date().toISOString().split('T')[0]
-    })
-    setShowExpenseForm(false)
-    alert('✅ تم تسجيل المصروف بنجاح!')
+  const loadReceptionData = async () => {
+    const today = new Date().toISOString().split('T')[0]
+    const [a, c, e, p, att] = await Promise.all([
+      supabase.from('appointments').select('*, patients(*), doctors(*), clinic_services(*)').eq('clinic_id', clinic.id).gte('appointment_date', today).order('appointment_date').order('appointment_time'),
+      supabase.from('complaints').select('*, patients(*)').eq('clinic_id', clinic.id).neq('status', 'resolved').order('created_at', { ascending: false }),
+      supabase.from('emergency_requests').select('*, patients(*)').eq('clinic_id', clinic.id).neq('status', 'closed').order('created_at', { ascending: false }),
+      supabase.from('payments').select('*').eq('clinic_id', clinic.id).gte('paid_at', `${today}T00:00:00`).order('paid_at', { ascending: false }),
+      supabase.from('staff_attendance').select('*').eq('clinic_id', clinic.id).eq('staff_id', user.id).is('clock_out', null).order('clock_in', { ascending: false }).limit(1),
+    ])
+    setAppointments(a.data || [])
+    setComplaints(c.data || [])
+    setEmergencies(e.data || [])
+    setPayments(p.data || [])
+    setAttendance(att.data?.[0] || null)
+    setLoading(false)
   }
 
-  const handleDeleteExpense = async (id) => {
-    if (!confirm('هل تريد حذف هذا المصروف؟')) return
-
-    if (String(id).startsWith('local-')) {
-      const updated = expenses.filter(e => e.id !== id)
-      setExpenses(updated)
-      localStorage.setItem(`hulool_expenses_${clinic.id}`, JSON.stringify(updated))
-      return
-    }
-
-    try {
-      const { error } = await supabase.from('expenses').delete().eq('id', id)
-      if (!error) {
-        setExpenses(expenses.filter(e => e.id !== id))
-      }
-    } catch (e) {
-      setExpenses(expenses.filter(e => e.id !== id))
-    }
+  const clockIn = async () => {
+    const { data, error } = await supabase.from('staff_attendance').insert([{ clinic_id: clinic.id, staff_id: user.id }]).select().single()
+    if (error) return alert('❌ ' + error.message)
+    setAttendance(data)
   }
 
-  // --- التحليلات المالية ---
-  const totalRevenue = records.reduce((sum, r) => sum + (parseFloat(r.paid_amount) || 0), 0)
-  const totalExpenses = expenses.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0)
-  const netProfit = totalRevenue - totalExpenses
-
-  // فرز الإيرادات حسب طريقة الدفع
-  const revenueByPaymentMethod = { cash: 0, card: 0, transfer: 0 }
-  records.forEach(r => {
-    const method = r.payment_method || 'cash'
-    revenueByPaymentMethod[method] = (revenueByPaymentMethod[method] || 0) + (parseFloat(r.paid_amount) || 0)
-  })
-
-  // فرز المصروفات حسب التصنيف
-  const expenseCategories = {
-    salaries: 'الرواتب والأجور',
-    rent: 'الإيجارات والمرافق',
-    supplies: 'الأدوية والمستلزمات الطبية',
-    maintenance: 'المعدات والصيانة',
-    marketing: 'التسويق والإعلانات',
-    utilities: 'الفواتير والخدمات',
-    other: 'مصاريف أخرى'
+  const clockOut = async () => {
+    if (!attendance) return
+    const now = new Date()
+    const start = new Date(attendance.clock_in)
+    const total_minutes = Math.max(0, Math.round((now - start) / 60000))
+    const { error } = await supabase.from('staff_attendance').update({ clock_out: now.toISOString(), total_minutes }).eq('id', attendance.id)
+    if (error) return alert('❌ ' + error.message)
+    setAttendance(null)
+    loadReceptionData()
   }
 
-  const expensesByCategory = { salaries: 0, rent: 0, supplies: 0, maintenance: 0, marketing: 0, utilities: 0, other: 0 }
-  expenses.forEach(e => {
-    const cat = e.category || 'other'
-    expensesByCategory[cat] = (expensesByCategory[cat] || 0) + (parseFloat(e.amount) || 0)
-  })
-
-  // تقسيم الإيرادات حسب الأطباء لتقرير الإنتاجية
-  const revenueByDoctor = {}
-  records.forEach(r => {
-    const docName = r.doctors?.name || 'طبيب غير محدد'
-    revenueByDoctor[docName] = (revenueByDoctor[docName] || 0) + (parseFloat(r.paid_amount) || 0)
-  })
-
-  const filteredExpenses = expenses.filter(e => expenseFilter === 'all' || e.category === expenseFilter)
-
-  const exportFinancialLedger = () => {
-    const rows = [['النوع', 'التاريخ', 'التصنيف/الوصف', 'المبلغ', 'طريقة الدفع']]
-    records.forEach(r => {
-      rows.push(['إيراد', r.created_at?.substring(0, 10) || '', 'كشف طبي للمريض', r.paid_amount, r.payment_method])
-    })
-    expenses.forEach(e => {
-      rows.push(['مصروف', e.date, expenseCategories[e.category] + ' - ' + e.description, e.amount, e.payment_method])
-    })
-    const csv = rows.map(r => r.join(',')).join('\n')
-    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = `ledger-${new Date().toISOString().split('T')[0]}.csv`; a.click()
+  const confirmAppointment = async (apt) => {
+    await supabase.from('appointments').update({ status: 'confirmed', confirmed_by: user.id, confirmed_at: new Date().toISOString() }).eq('id', apt.id)
   }
+
+  const markPaid = async (apt) => {
+    const defaultAmount = apt.clinic_services?.price || 0
+    const amount = prompt('اكتب المبلغ المدفوع بالريال', defaultAmount)
+    if (!amount) return
+    const payment_method = prompt('طريقة الدفع: cash / card / transfer / insurance', 'cash') || 'cash'
+
+    const { error } = await supabase.from('payments').insert([{
+      clinic_id: clinic.id,
+      patient_id: apt.patient_id,
+      appointment_id: apt.id,
+      amount: parseFloat(amount) || 0,
+      payment_method,
+      received_by: user.id,
+      notes: `دفعة من الاستقبال للموعد ${apt.appointment_date}`,
+    }])
+    if (error) return alert('❌ ' + error.message)
+
+    await supabase.from('appointments').update({ paid_by: user.id, paid_at: new Date().toISOString(), status: apt.status === 'pending' ? 'confirmed' : apt.status }).eq('id', apt.id)
+    alert('✓ تم تسجيل الدفع')
+    loadReceptionData()
+  }
+
+  const today = new Date().toISOString().split('T')[0]
+  const todayAppointments = appointments.filter(a => a.appointment_date === today)
+  const pendingAppointments = appointments.filter(a => a.status === 'pending')
+  const todayRevenue = payments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0)
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      {/* العناوين والتحكم */}
-      <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
-        <h2 className="text-3xl font-black text-slate-800 flex items-center gap-2">
-          <Receipt className="w-8 h-8 text-indigo-600" /> الحسابات والمصروفات والربحية
-        </h2>
-        <div className="flex gap-2">
-          <button onClick={() => setShowExpenseForm(!showExpenseForm)} className="gradient-medical text-white px-5 py-3 rounded-2xl font-bold shadow-xl btn-medical flex items-center gap-2">
-            <Plus className="w-5 h-5" /> {showExpenseForm ? 'إلغاء' : 'تسجيل مصروف'}
-          </button>
-          <button onClick={exportFinancialLedger} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-5 py-3 rounded-2xl font-bold border border-slate-200 flex items-center gap-2 transition">
-            📥 تصدير دفتر الأستاذ
-          </button>
+    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-sky-50 to-cyan-50 page-enter" dir="rtl">
+      {notification && <Toast msg={notification} gradient="gradient-warning" />}
+      <StaffHeader title="شاشة الاستقبال" subtitle={`${user.full_name || user.username} • ${clinic.name}`} icon={Users} gradient="gradient-medical-dark" onLogout={onLogout} />
+
+      <div className="max-w-7xl mx-auto px-4 pt-4">
+        <div className="flex gap-2 overflow-x-auto pb-2">
+          {[
+            { id: 'dashboard', label: 'الرئيسية', icon: BarChart3 },
+            { id: 'appointments', label: 'المواعيد', icon: Calendar },
+            { id: 'payments', label: 'المدفوعات', icon: Receipt },
+            { id: 'emergency', label: 'الطوارئ', icon: AlertCircle },
+            { id: 'complaints', label: 'الشكاوى', icon: FileText },
+          ].map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)} className={`px-4 py-2 rounded-xl font-bold text-sm whitespace-nowrap flex items-center gap-1.5 ${tab === t.id ? 'gradient-medical text-white shadow-lg' : 'bg-white text-slate-700 border border-slate-100'}`}>
+              <t.icon className="w-4 h-4" /> {t.label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* نموذج تسجيل المصروفات */}
-      {showExpenseForm && (
-        <div className="bg-white rounded-3xl p-6 shadow-xl animate-slide-up border border-indigo-100">
-          <h3 className="text-xl font-bold mb-4 text-slate-800">➕ تسجيل عملية مصروف جديدة</h3>
-          <form onSubmit={handleAddExpense} className="grid md:grid-cols-2 gap-4">
-            <div className="flex flex-col">
-              <label className="text-xs font-bold text-slate-600 mb-1">وصف المصروف *</label>
-              <input required placeholder="مثال: فاتورة كهرباء شهر مايو، رواتب..." value={expenseForm.description} onChange={(e) => setExpenseForm({...expenseForm, description: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl outline-none" />
-            </div>
-
-            <div className="flex flex-col">
-              <label className="text-xs font-bold text-slate-600 mb-1">المبلغ المطلوب (ر.س) *</label>
-              <input type="number" required placeholder="مثال: 1500" value={expenseForm.amount} onChange={(e) => setExpenseForm({...expenseForm, amount: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl outline-none" />
-            </div>
-
-            <div className="flex flex-col">
-              <label className="text-xs font-bold text-slate-600 mb-1">تصنيف المصروف</label>
-              <select value={expenseForm.category} onChange={(e) => setExpenseForm({...expenseForm, category: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl outline-none font-bold">
-                {Object.entries(expenseCategories).map(([key, val]) => (
-                  <option key={key} value={key}>{val}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex flex-col">
-              <label className="text-xs font-bold text-slate-600 mb-1">طريقة الدفع</label>
-              <select value={expenseForm.payment_method} onChange={(e) => setExpenseForm({...expenseForm, payment_method: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl outline-none font-bold">
-                <option value="cash">نقداً (كاش)</option>
-                <option value="card">بطاقة مدي / فيزا</option>
-                <option value="transfer">تحويل بنكي</option>
-              </select>
-            </div>
-
-            <div className="flex flex-col md:col-span-2">
-              <label className="text-xs font-bold text-slate-600 mb-1">التاريخ</label>
-              <input type="date" value={expenseForm.date} onChange={(e) => setExpenseForm({...expenseForm, date: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl outline-none" />
-            </div>
-
-            <button type="submit" className="md:col-span-2 py-3.5 gradient-medical text-white rounded-xl font-bold shadow-lg">💾 حفظ المصروف</button>
-          </form>
-        </div>
-      )}
-
-      {/* بطاقات الإحصاءات المالية الكبرى */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-3xl p-6 shadow-md border border-slate-100 flex items-center justify-between">
+      <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-6">
+        <div className="bg-white rounded-3xl p-5 shadow-xl border border-sky-100 flex items-center justify-between flex-wrap gap-3">
           <div>
-            <p className="text-slate-500 text-sm font-bold">💰 إجمالي الإيرادات</p>
-            <p className="text-2xl font-black text-slate-800 mt-1">{totalRevenue.toLocaleString()} ر.س</p>
+            <p className="text-sm text-slate-500">حالة الدوام</p>
+            <p className={`text-xl font-black ${attendance ? 'text-emerald-600' : 'text-slate-700'}`}>{attendance ? 'مسجل دخول' : 'لم تسجل دخول اليوم'}</p>
           </div>
-          <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-xl">💵</div>
+          {attendance ? (
+            <button onClick={clockOut} className="gradient-danger text-white px-5 py-3 rounded-2xl font-bold shadow-lg">تسجيل خروج</button>
+          ) : (
+            <button onClick={clockIn} className="gradient-success text-white px-5 py-3 rounded-2xl font-bold shadow-lg">تسجيل دخول</button>
+          )}
         </div>
 
-        <div className="bg-white rounded-3xl p-6 shadow-md border border-slate-100 flex items-center justify-between">
-          <div>
-            <p className="text-slate-500 text-sm font-bold">📉 إجمالي المصروفات</p>
-            <p className="text-2xl font-black text-red-600 mt-1">{totalExpenses.toLocaleString()} ر.س</p>
-          </div>
-          <div className="w-12 h-12 rounded-2xl bg-red-50 text-red-600 flex items-center justify-center font-bold text-xl">💸</div>
-        </div>
-
-        <div className={`rounded-3xl p-6 shadow-md border flex items-center justify-between ${netProfit >= 0 ? 'bg-emerald-50/50 border-emerald-200' : 'bg-red-50/50 border-red-200'}`}>
-          <div>
-            <p className="text-slate-600 text-sm font-bold">📈 صافي الأرباح</p>
-            <p className={`text-2xl font-black mt-1 ${netProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{netProfit.toLocaleString()} ر.س</p>
-          </div>
-          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-bold text-xl ${netProfit >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-            {netProfit >= 0 ? '📈' : '📉'}
-          </div>
-        </div>
-
-        <div className="bg-white rounded-3xl p-6 shadow-md border border-slate-100 flex items-center justify-between">
-          <div>
-            <p className="text-slate-500 text-sm font-bold">🩺 متوسط دخل الكشف</p>
-            <p className="text-2xl font-black text-indigo-600 mt-1">{(records.length ? (totalRevenue / records.length) : 0).toFixed(0)} ر.س</p>
-          </div>
-          <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-xl">📊</div>
-        </div>
-      </div>
-
-      {/* تحليلات طرق الدفع والتصنيفات والأطباء */}
-      <div className="grid md:grid-cols-3 gap-6">
-        {/* طرق الدفع */}
-        <div className="bg-white rounded-3xl p-6 shadow-xl border border-slate-100 space-y-4">
-          <h3 className="text-lg font-bold text-slate-800 border-b pb-2 flex items-center gap-2">💵 إيرادات طرق الدفع</h3>
-          <div className="space-y-3">
-            {[
-              { key: 'cash', label: 'نقدي (كاش)', color: 'bg-emerald-500' },
-              { key: 'card', label: 'بطاقة مدي / فيزا', color: 'bg-sky-500' },
-              { key: 'transfer', label: 'تحويل بنكي', color: 'bg-indigo-500' }
-            ].map(m => {
-              const val = revenueByPaymentMethod[m.key] || 0
-              const pct = totalRevenue > 0 ? (val / totalRevenue * 100).toFixed(0) : 0
-              return (
-                <div key={m.key} className="space-y-1">
-                  <div className="flex justify-between text-sm font-bold">
-                    <span className="text-slate-700">{m.label}</span>
-                    <span className="text-slate-600">{val.toLocaleString()} ر.س ({pct}%)</span>
-                  </div>
-                  <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                    <div className={`h-full ${m.color}`} style={{ width: `${pct}%` }}></div>
-                  </div>
+        {loading ? <div className="text-center py-12"><div className="spinner-medical w-14 h-14 mx-auto"></div></div> : (
+          <>
+            {tab === 'dashboard' && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <BigStat icon={Calendar} label="مواعيد اليوم" value={todayAppointments.length} gradient="gradient-medical" onClick={() => setTab('appointments')} />
+                  <BigStat icon={Clock} label="بانتظار التأكيد" value={pendingAppointments.length} gradient="gradient-warning" onClick={() => setTab('appointments')} />
+                  <BigStat icon={AlertCircle} label="طلبات طوارئ" value={emergencies.length} gradient="gradient-danger" onClick={() => setTab('emergency')} />
+                  <BigStat icon={DollarSign} label="تحصيل اليوم" value={todayRevenue.toFixed(0)} suffix="ر.س" gradient="gradient-success" onClick={() => setTab('payments')} />
                 </div>
-              )
-            })}
-          </div>
-        </div>
-
-        {/* تصنيف المصروفات */}
-        <div className="bg-white rounded-3xl p-6 shadow-xl border border-slate-100 space-y-4">
-          <h3 className="text-lg font-bold text-slate-800 border-b pb-2 flex items-center gap-2">💸 تصنيفات المصروفات</h3>
-          <div className="space-y-3 max-h-64 overflow-y-auto">
-            {Object.entries(expenseCategories).map(([key, label]) => {
-              const val = expensesByCategory[key] || 0
-              const pct = totalExpenses > 0 ? (val / totalExpenses * 100).toFixed(0) : 0
-              return (
-                <div key={key} className="space-y-1">
-                  <div className="flex justify-between text-sm font-bold">
-                    <span className="text-slate-700">{label}</span>
-                    <span className="text-slate-600">{val.toLocaleString()} ر.س ({pct}%)</span>
-                  </div>
-                  <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-red-400" style={{ width: `${pct}%` }}></div>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-
-        {/* إنتاجية الأطباء */}
-        <div className="bg-white rounded-3xl p-6 shadow-xl border border-slate-100 space-y-4">
-          <h3 className="text-lg font-bold text-slate-800 border-b pb-2 flex items-center gap-2">👨‍⚕️ إنتاجية الأطباء المادية</h3>
-          <div className="space-y-3 max-h-64 overflow-y-auto">
-            {doctors.length === 0 ? (
-              <p className="text-sm text-slate-500 text-center py-6">لا يوجد أطباء مضافين</p>
-            ) : (
-              doctors.map(d => {
-                const val = revenueByDoctor[d.name] || 0
-                const pct = totalRevenue > 0 ? (val / totalRevenue * 100).toFixed(0) : 0
-                return (
-                  <div key={d.id} className="space-y-1">
-                    <div className="flex justify-between text-sm font-bold">
-                      <span className="text-slate-700">{d.name}</span>
-                      <span className="text-slate-600">{val.toLocaleString()} ر.س ({pct}%)</span>
-                    </div>
-                    <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-indigo-500" style={{ width: `${pct}%` }}></div>
-                    </div>
-                  </div>
-                )
-              })
+                <ReceptionAppointments appointments={todayAppointments} onConfirm={confirmAppointment} onPaid={markPaid} title="مواعيد اليوم" />
+              </div>
             )}
-          </div>
-        </div>
-      </div>
-
-      {/* سجل المصروفات التفصيلي */}
-      <div className="bg-white rounded-3xl p-6 shadow-xl border border-slate-100">
-        <div className="flex flex-col sm:flex-row gap-3 items-center justify-between border-b pb-4 mb-4">
-          <h3 className="text-xl font-bold text-slate-800">📄 دفتر سجل المصروفات التشغيلية</h3>
-          <div className="flex gap-2">
-            <select value={expenseFilter} onChange={(e) => setExpenseFilter(e.target.value)} className="px-4 py-2 border border-slate-200 rounded-xl outline-none font-bold text-sm bg-slate-50">
-              <option value="all">كل التصنيفات</option>
-              {Object.entries(expenseCategories).map(([key, val]) => (
-                <option key={key} value={key}>{val}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {filteredExpenses.length === 0 ? (
-          <div className="text-center py-12 text-slate-500">
-            <p className="font-medium">لا توجد مصروفات مسجلة تحت هذا الفلتر</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-right text-sm">
-              <thead>
-                <tr className="border-b-2 border-slate-100 text-slate-500 font-bold">
-                  <th className="py-3 px-2">التاريخ</th>
-                  <th className="py-3 px-2">الوصف</th>
-                  <th className="py-3 px-2">التصنيف</th>
-                  <th className="py-3 px-2">المبلغ</th>
-                  <th className="py-3 px-2">طريقة الدفع</th>
-                  <th className="py-3 px-2 text-center">إجراءات</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredExpenses.map(e => (
-                  <tr key={e.id} className="border-b border-slate-50 hover:bg-slate-50 transition">
-                    <td className="py-3 px-2 font-medium">{e.date}</td>
-                    <td className="py-3 px-2 text-slate-800 font-bold">{e.description}</td>
-                    <td className="py-3 px-2"><span className="px-2.5 py-1 bg-indigo-50 text-indigo-700 font-bold rounded-lg text-xs">{expenseCategories[e.category] || 'أخرى'}</span></td>
-                    <td className="py-3 px-2 font-black text-red-600">{e.amount} ر.س</td>
-                    <td className="py-3 px-2 text-slate-600">
-                      {e.payment_method === 'cash' ? '💵 نقدي' : e.payment_method === 'card' ? '💳 بطاقة' : '🏦 تحويل'}
-                    </td>
-                    <td className="py-3 px-2 text-center">
-                      <button onClick={() => handleDeleteExpense(e.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-lg transition" title="حذف المصروف">
-                        <Trash2 className="w-4 h-4 inline" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+            {tab === 'appointments' && <ReceptionAppointments appointments={appointments} onConfirm={confirmAppointment} onPaid={markPaid} title="كل المواعيد القادمة" />}
+            {tab === 'payments' && <ReceptionPayments payments={payments} total={todayRevenue} />}
+            {tab === 'emergency' && <EmergencyTab clinic={clinic} user={user} emergencies={emergencies} onUpdate={loadReceptionData} />}
+            {tab === 'complaints' && <ComplaintsManageTab complaints={complaints} />}
+          </>
         )}
       </div>
     </div>
   )
 }
 
+function ReceptionAppointments({ appointments, onConfirm, onPaid, title }) {
+  return (
+    <div className="bg-white rounded-3xl p-6 shadow-xl border border-sky-100">
+      <h3 className="text-xl font-black text-slate-800 mb-4 flex items-center gap-2"><Calendar className="w-6 h-6 text-sky-600" /> {title}</h3>
+      {appointments.length === 0 ? <EmptyAdminState icon={Calendar} message="لا توجد مواعيد" /> : (
+        <div className="space-y-3">
+          {appointments.map(apt => (
+            <div key={apt.id} className="border-2 border-slate-100 rounded-2xl p-4 hover:border-sky-200 transition">
+              <div className="flex items-start justify-between flex-wrap gap-3">
+                <div>
+                  <p className="font-bold text-slate-800 text-lg">{apt.patients?.name || 'مريض غير محدد'}</p>
+                  <p className="text-sm text-slate-600">📞 {apt.patients?.phone || '-'}</p>
+                  <p className="text-sm text-slate-600">👨‍⚕️ {apt.doctors?.name || '-'}</p>
+                  <p className="text-sm font-bold text-sky-700 mt-1">{apt.appointment_date} • {apt.appointment_time?.substring(0,5)}</p>
+                </div>
+                <div className="flex gap-2 flex-wrap justify-end">
+                  <StatusPill status={apt.status} />
+                  {apt.status === 'pending' && <button onClick={() => onConfirm(apt)} className="gradient-success text-white px-4 py-2 rounded-xl text-sm font-bold">تأكيد</button>}
+                  {!apt.paid_at && <button onClick={() => onPaid(apt)} className="gradient-warning text-white px-4 py-2 rounded-xl text-sm font-bold">تسجيل دفع</button>}
+                  {apt.paid_at && <span className="bg-emerald-50 text-emerald-700 px-3 py-2 rounded-xl text-sm font-bold">مدفوع</span>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
-// ═══════════════════════════════════════════════════════════
-// IntegrationsTab - ربط وتكامل الخدمات الخارجية بدون كود (المرحلة 14)
-// ═══════════════════════════════════════════════════════════
-function IntegrationsTab({ clinic }) {
-  const [loading, setLoading] = useState(false)
-  const [form, setForm] = useState({
-    resend_key: localStorage.getItem(`resend_key_${clinic.id}`) || '',
-    whatsapp_id: localStorage.getItem(`whatsapp_id_${clinic.id}`) || '',
-    whatsapp_token: localStorage.getItem(`whatsapp_token_${clinic.id}`) || '',
-    n8n_url: localStorage.getItem(`n8n_url_${clinic.id}`) || '',
-  })
+function ReceptionPayments({ payments, total }) {
+  return (
+    <div className="bg-white rounded-3xl p-6 shadow-xl border border-emerald-100">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-xl font-black text-slate-800 flex items-center gap-2"><Receipt className="w-6 h-6 text-emerald-600" /> مدفوعات اليوم</h3>
+        <span className="gradient-success text-white px-4 py-2 rounded-xl font-black">{total.toFixed(0)} ر.س</span>
+      </div>
+      {payments.length === 0 ? <EmptyAdminState icon={Receipt} message="لا توجد مدفوعات اليوم" /> : (
+        <div className="space-y-2">
+          {payments.map(p => (
+            <div key={p.id} className="bg-slate-50 rounded-xl p-3 flex items-center justify-between">
+              <div>
+                <p className="font-bold text-slate-800">{parseFloat(p.amount).toFixed(0)} ر.س</p>
+                <p className="text-xs text-slate-500">{p.payment_method} • {new Date(p.paid_at).toLocaleString('ar-SA')}</p>
+              </div>
+              <CheckCircle className="w-5 h-5 text-emerald-600" />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
-  const saveIntegrations = (e) => {
-    e.preventDefault(); setLoading(true)
-    localStorage.setItem(`resend_key_${clinic.id}`, form.resend_key)
-    localStorage.setItem(`whatsapp_id_${clinic.id}`, form.whatsapp_id)
-    localStorage.setItem(`whatsapp_token_${clinic.id}`, form.whatsapp_token)
-    localStorage.setItem(`n8n_url_${clinic.id}`, form.n8n_url)
-    
-    setTimeout(() => {
-      setLoading(false)
-      alert('✅ تم حفظ إعدادات التكامل وربط الخدمات بنجاح!')
-    }, 800)
+function EmergencyTab({ clinic, user, emergencies, onUpdate }) {
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState({ patient_name: '', phone: '', description: '', priority: 'medium' })
+
+  const submit = async (e) => {
+    e.preventDefault()
+    const { error } = await supabase.from('emergency_requests').insert([{ ...form, clinic_id: clinic.id, created_by: user.id, status: 'open' }])
+    if (error) return alert('❌ ' + error.message)
+    setForm({ patient_name: '', phone: '', description: '', priority: 'medium' })
+    setShowForm(false)
+    onUpdate()
   }
 
-  const testConnection = (service) => {
-    alert(`⏳ جاري فحص الاتصال بـ ${service}...\n✓ تم تأكيد نجاح الاتصال وتفعيل بوابة الإرسال!`)
+  const closeEmergency = async (id) => {
+    await supabase.from('emergency_requests').update({ status: 'closed', resolved_at: new Date().toISOString() }).eq('id', id)
+    onUpdate()
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="bg-white rounded-3xl p-6 shadow-xl border border-sky-100">
-        <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2 mb-2">
-          <Globe className="w-7 h-7 text-sky-600 animate-pulse" /> تكامل وربط الخدمات الخارجية (Zero Code)
-        </h2>
-        <p className="text-slate-600 text-sm">اربط عيادتك ببوابات الإرسال ومحركات الأتمتة لتعمل بشكل مستقل وتلقائي بالكامل بضغطات زر.</p>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-2xl font-black text-slate-800 flex items-center gap-2"><AlertCircle className="w-7 h-7 text-red-600" /> الطوارئ</h3>
+        <button onClick={() => setShowForm(!showForm)} className="gradient-danger text-white px-5 py-3 rounded-2xl font-bold shadow-lg">{showForm ? 'إلغاء' : 'طلب طوارئ'}</button>
       </div>
-
-      <form onSubmit={saveIntegrations} className="grid md:grid-cols-2 gap-6">
-        {/* بوابة الإيميل Resend */}
-        <div className="bg-white rounded-2xl p-6 shadow-md border border-slate-100 flex flex-col justify-between">
-          <div className="space-y-4">
-            <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">📧 ربط البريد الإلكتروني (Resend)</h3>
-            <p className="text-xs text-slate-500">لإرسال تأكيدات المواعيد، الفواتير، والتقارير الطبية كملفات PDF تلقائياً للمرضى.</p>
-            <div className="flex flex-col">
-              <label className="text-xs font-bold text-slate-600 mb-1">Resend API Key</label>
-              <input type="password" value={form.resend_key} onChange={(e) => setForm({...form, resend_key: e.target.value})} placeholder="re_xxxxxxxxxxxxxxxx" className="px-4 py-3 border-2 border-slate-200 rounded-xl outline-none text-left" />
+      {showForm && (
+        <form onSubmit={submit} className="bg-white rounded-3xl p-6 shadow-xl border border-red-100 grid md:grid-cols-2 gap-4">
+          <input required placeholder="اسم المريض" value={form.patient_name} onChange={(e) => setForm({...form, patient_name: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" />
+          <input required placeholder="رقم الجوال" value={form.phone} onChange={(e) => setForm({...form, phone: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" />
+          <select value={form.priority} onChange={(e) => setForm({...form, priority: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none">
+            <option value="low">منخفضة</option><option value="medium">متوسطة</option><option value="high">عالية</option><option value="critical">حرجة</option>
+          </select>
+          <textarea required placeholder="وصف الحالة" value={form.description} onChange={(e) => setForm({...form, description: e.target.value})} className="md:col-span-2 px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none resize-none" />
+          <button className="md:col-span-2 gradient-danger text-white py-3 rounded-xl font-bold">حفظ الطلب</button>
+        </form>
+      )}
+      <div className="bg-white rounded-3xl p-6 shadow-xl border border-red-100">
+        {emergencies.length === 0 ? <EmptyAdminState icon={CheckCircle} message="لا توجد طلبات طوارئ" /> : emergencies.map(e => (
+          <div key={e.id} className="border-2 border-red-100 rounded-2xl p-4 mb-3">
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div>
+                <p className="font-bold text-slate-800">{e.patient_name || e.patients?.name}</p>
+                <p className="text-sm text-slate-600">{e.phone || e.patients?.phone}</p>
+                <p className="text-sm text-slate-700 mt-2">{e.description}</p>
+              </div>
+              <div className="flex gap-2 items-center">
+                <span className="bg-red-50 text-red-700 px-3 py-1 rounded-full text-xs font-bold">{e.priority}</span>
+                <button onClick={() => closeEmergency(e.id)} className="bg-slate-100 hover:bg-slate-200 px-3 py-2 rounded-xl text-sm font-bold">إغلاق</button>
+              </div>
             </div>
           </div>
-          <button type="button" onClick={() => testConnection('Resend Email API')} className="mt-4 w-full py-2.5 bg-sky-50 text-sky-600 hover:bg-sky-100 font-bold rounded-xl text-xs transition border border-sky-200">🧪 اختبار الاتصال بـ Resend</button>
-        </div>
-
-        {/* بوابة الواتساب */}
-        <div className="bg-white rounded-2xl p-6 shadow-md border border-slate-100 flex flex-col justify-between">
-          <div className="space-y-4">
-            <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">📱 ربط الواتساب (WhatsApp Automation)</h3>
-            <p className="text-xs text-slate-500">لإرسال رسائل ترحيب، تذكيرات المواعيد، والتواصل المباشر مع المرضى تلقائياً.</p>
-            <div className="flex flex-col">
-              <label className="text-xs font-bold text-slate-600 mb-1">Phone Number ID</label>
-              <input value={form.whatsapp_id} onChange={(e) => setForm({...form, whatsapp_id: e.target.value})} placeholder="1098xxxxxxxx" className="px-4 py-3 border-2 border-slate-200 rounded-xl outline-none text-left mb-2" />
-              <label className="text-xs font-bold text-slate-600 mb-1">System Access Token</label>
-              <input type="password" value={form.whatsapp_token} onChange={(e) => setForm({...form, whatsapp_token: e.target.value})} placeholder="EAAGxxxxxxxxxxxx" className="px-4 py-3 border-2 border-slate-200 rounded-xl outline-none text-left" />
-            </div>
-          </div>
-          <button type="button" onClick={() => testConnection('WhatsApp Automation Gateway')} className="mt-4 w-full py-2.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 font-bold rounded-xl text-xs transition border border-emerald-200">🧪 اختبار إرسال رسالة تجريبية</button>
-        </div>
-
-        {/* ربط n8n */}
-        <div className="bg-white rounded-2xl p-6 shadow-md border border-slate-100 md:col-span-2 space-y-4">
-          <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">🔌 ربط المحرك وأتمتة العمليات (n8n Webhook)</h3>
-          <p className="text-xs text-slate-500">أرسل بيانات المواعيد والمدفوعات لحظياً لـ n8n لبناء سيناريوهات أتمتة مخصصة وربطها بـ Google Sheets أو Telegram.</p>
-          <div className="flex flex-col">
-            <label className="text-xs font-bold text-slate-600 mb-1">Webhook URL</label>
-            <input value={form.n8n_url} onChange={(e) => setForm({...form, n8n_url: e.target.value})} placeholder="https://n8n.yourdomain.com/webhook/xxxx-xxxx-xxxx" className="px-4 py-3 border-2 border-slate-200 rounded-xl outline-none text-left" />
-          </div>
-          <button type="button" onClick={() => testConnection('n8n Webhook Engine')} className="w-full py-2.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 font-bold rounded-xl text-xs transition border border-indigo-200">🧪 إرسال بيانات تجريبية (Test Webhook Payload)</button>
-        </div>
-
-        <button type="submit" disabled={loading} className="md:col-span-2 py-4 gradient-medical text-white font-bold rounded-2xl text-lg shadow-xl btn-medical">{loading ? '⏳ جاري الحفظ...' : '💾 حفظ وتفعيل جميع الإعدادات'}</button>
-      </form>
+        ))}
+      </div>
     </div>
   )
 }
 
 // ═══════════════════════════════════════════════════════════
-// ExcelImportTab - استيراد البيانات القديمة من إكسل (المرحلة 13)
+// Accountant Dashboard - لوحة المحاسب
 // ═══════════════════════════════════════════════════════════
-function ExcelImportTab({ clinic, onRefresh }) {
-  const [selectedTemplate, setSelectedTemplate] = useState(null)
-  const [parsedRows, setParsedRows] = useState([])
-  const [validationErrors, setValidationErrors] = useState([])
-  const [saving, setSaving] = useState(false)
+function AccountantDashboard({ user, clinic, onLogout }) {
+  const [records, setRecords] = useState([])
+  const [payments, setPayments] = useState([])
+  const [expenses, setExpenses] = useState([])
+  const [tab, setTab] = useState('dashboard')
+  const [showExpenseForm, setShowExpenseForm] = useState(false)
+  const [expenseForm, setExpenseForm] = useState({ description: '', amount: '', category: 'مصاريف متنوعة', payment_method: 'cash', date: new Date().toISOString().split('T')[0], vendor: '', notes: '' })
 
-  const templates = [
-    { id: 'patients', title: '👥 استيراد المرضى القدامى', desc: 'استورد ملف المرضى القديم بهوياتهم وجوالاتهم وتأمينهم.' },
-    { id: 'revenue', title: '💰 استيراد الإيرادات القديمة', desc: 'استورد الإيرادات السابقة لمطابقتها في الداشبورد المحاسبي.' },
-    { id: 'expenses', title: '💸 استيراد المصروفات السابقة', desc: 'استورد دفتر سجل المصروفات القديم لحساب أرباح السنوات الماضية.' },
-    { id: 'doctors', title: '👨‍⚕️ استيراد سجل الأطباء', desc: 'استورد أسماء وتخصصات وحسابات الأطباء لتأسيس عياداتهم.' },
-    { id: 'past_invoices', title: '📄 استيراد الفواتير السابقة', desc: 'استورد تاريخ الفواتير والمبالغ المسددة والمستحقة عليها.' }
-  ]
+  useEffect(() => { loadAccountingData() }, [])
 
-  const handleSimulatedUpload = (e) => {
+  useRealtime('payments', (payload) => {
+    if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) loadAccountingData()
+  }, { column: 'clinic_id', value: clinic.id })
+
+  const loadAccountingData = async () => {
+    const [r, p, e] = await Promise.all([
+      supabase.from('medical_records').select('*, patients(name), doctors(name)').eq('clinic_id', clinic.id).order('created_at', { ascending: false }),
+      supabase.from('payments').select('*').eq('clinic_id', clinic.id).order('paid_at', { ascending: false }),
+      supabase.from('expenses').select('*').eq('clinic_id', clinic.id).order('date', { ascending: false }),
+    ])
+    setRecords(r.data || [])
+    setPayments(p.data || [])
+    setExpenses(e.data || [])
+  }
+
+  const addExpense = async (e) => {
     e.preventDefault()
-    // محاكاة قراءة ملف CSV/Excel والتحقق التلقائي منه بنسبة 100%
-    if (selectedTemplate === 'patients') {
-      setParsedRows([
-        { name: 'محمد الفراج', phone: '0567777777', national_id: '1098822334', insurance_company: 'بوبا العربية', status: 'valid' },
-        { name: 'سارة عبدالرحمن', phone: '0543333222', national_id: '1087722119', insurance_company: 'التعاونية للتأمين', status: 'valid' },
-        { name: 'أحمد مرسي', phone: '05999999', national_id: '', insurance_company: '', status: 'warning', msg: 'رقم الجوال قصير وقد يكون غير صحيح.' },
-        { name: 'عميل بدون اسم', phone: '', national_id: '1029922112', insurance_company: '', status: 'error', msg: 'حقل الاسم والجوال إلزاميان لتأسيس الملف الطبي.' }
-      ])
-    } else {
-      setParsedRows([
-        { desc: 'رواتب موظفي الاستقبال', amount: 5000, date: '2026-05-01', category: 'salaries', status: 'valid' },
-        { desc: 'صيانة جهاز الأشعة رقم 2', amount: 1200, date: '2026-05-05', category: 'maintenance', status: 'valid' },
-        { desc: 'شراء كميات بنج تجميلي ومخدر', amount: -250, date: '2026-05-10', category: 'supplies', status: 'error', msg: 'المبلغ يجب أن يكون رقماً موجباً أكبر من صفر.' }
-      ])
-    }
+    const { error } = await supabase.from('expenses').insert([{ ...expenseForm, clinic_id: clinic.id, amount: parseFloat(expenseForm.amount) || 0, created_by: user.id }])
+    if (error) return alert('❌ ' + error.message)
+    setExpenseForm({ description: '', amount: '', category: 'مصاريف متنوعة', payment_method: 'cash', date: new Date().toISOString().split('T')[0], vendor: '', notes: '' })
+    setShowExpenseForm(false)
+    loadAccountingData()
   }
 
-  const handleConfirmSave = () => {
-    setSaving(true)
-    setTimeout(() => {
-      setSaving(false)
-      alert('✓ تم استيراد وحفظ كافة السجلات المطابقة بنجاح وتحديث الإحصائيات فوراً!')
-      setParsedRows([])
-      setSelectedTemplate(null)
-      onRefresh()
-    }, 1200)
+  const exportCSV = () => {
+    const rows = [['التاريخ', 'النوع', 'الوصف', 'المبلغ', 'طريقة الدفع']]
+    payments.forEach(p => rows.push([p.paid_at?.substring(0,10), 'إيراد', p.notes || 'دفعة', p.amount, p.payment_method]))
+    expenses.forEach(e => rows.push([e.date, 'مصروف', e.description, `-${e.amount}`, e.payment_method]))
+    const csv = rows.map(r => r.join(',')).join('\n')
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `accounting-${new Date().toISOString().split('T')[0]}.csv`; a.click()
   }
+
+  const totalRecordsRevenue = records.reduce((sum, r) => sum + (parseFloat(r.paid_amount) || 0), 0)
+  const totalPayments = payments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0)
+  const totalExpenses = expenses.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0)
+  const totalRevenue = Math.max(totalRecordsRevenue, totalPayments)
+  const netProfit = totalRevenue - totalExpenses
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="bg-white rounded-3xl p-6 shadow-xl border border-sky-100">
-        <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2 mb-2">
-          <FileText className="w-7 h-7 text-sky-600 animate-pulse" /> استيراد البيانات القديمة (دقة 100% بدون AI)
-        </h2>
-        <p className="text-slate-600 text-sm">اختر نوع البيانات التي ترغب في استيرادها، وحمل القالب، ثم ارفع ملف الـ Excel للتحقق التلقائي والحفظ السريع.</p>
+    <div className="min-h-screen bg-gradient-to-br from-violet-50 via-sky-50 to-emerald-50 page-enter" dir="rtl">
+      <StaffHeader title="لوحة المحاسب" subtitle={`${user.full_name || user.username} • ${clinic.name}`} icon={DollarSign} gradient="gradient-medical-dark" onLogout={onLogout} />
+
+      <div className="max-w-7xl mx-auto px-4 pt-4">
+        <div className="flex gap-2 overflow-x-auto pb-2">
+          {[
+            { id: 'dashboard', label: 'الرئيسية', icon: BarChart3 },
+            { id: 'payments', label: 'الإيرادات', icon: Receipt },
+            { id: 'expenses', label: 'المصروفات', icon: DollarSign },
+          ].map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)} className={`px-4 py-2 rounded-xl font-bold text-sm whitespace-nowrap flex items-center gap-1.5 ${tab === t.id ? 'gradient-purple text-white shadow-lg' : 'bg-white text-slate-700 border border-slate-100'}`}>
+              <t.icon className="w-4 h-4" /> {t.label}
+            </button>
+          ))}
+          <button onClick={exportCSV} className="gradient-success text-white px-4 py-2 rounded-xl font-bold text-sm whitespace-nowrap">تصدير CSV</button>
+        </div>
       </div>
 
-      {!selectedTemplate ? (
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {templates.map(t => (
-            <div key={t.id} onClick={() => setSelectedTemplate(t.id)} className="bg-white rounded-2xl p-6 shadow-md border border-slate-100 hover:border-sky-200 hover:shadow-xl transition cursor-pointer flex flex-col justify-between stat-card">
-              <div>
-                <h3 className="font-bold text-slate-800 text-lg mb-2">{t.title}</h3>
-                <p className="text-xs text-slate-500 leading-relaxed mb-4">{t.desc}</p>
-              </div>
-              <span className="text-sky-600 font-bold text-xs inline-flex items-center gap-1">تحميل القالب وبدء الاستيراد ←</span>
+      <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-6">
+        {tab === 'dashboard' && (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <BigStat icon={TrendingUp} label="الإيرادات" value={totalRevenue.toFixed(0)} suffix="ر.س" gradient="gradient-success" onClick={() => setTab('payments')} />
+              <BigStat icon={DollarSign} label="المصروفات" value={totalExpenses.toFixed(0)} suffix="ر.س" gradient="gradient-danger" onClick={() => setTab('expenses')} />
+              <BigStat icon={BarChart3} label="صافي الربح" value={netProfit.toFixed(0)} suffix="ر.س" gradient="gradient-medical" />
+              <BigStat icon={Receipt} label="عمليات الدفع" value={payments.length} gradient="gradient-purple" onClick={() => setTab('payments')} />
             </div>
-          ))}
-        </div>
-      ) : (
-        <div className="bg-white rounded-3xl p-6 shadow-xl border border-sky-100 space-y-6 animate-slide-up">
-          <div className="flex justify-between items-center border-b pb-4">
-            <h3 className="text-xl font-bold text-slate-800">📥 استيراد ملف: {templates.find(t => t.id === selectedTemplate)?.title}</h3>
-            <button onClick={() => { setSelectedTemplate(null); setParsedRows([]) }} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm transition">عودة للقوالب</button>
-          </div>
+            <AccountingSummary payments={payments} expenses={expenses} />
+          </>
+        )}
+        {tab === 'payments' && <PaymentsList payments={payments} records={records} />}
+        {tab === 'expenses' && (
+          <ExpensesList expenses={expenses} showForm={showExpenseForm} setShowForm={setShowExpenseForm} form={expenseForm} setForm={setExpenseForm} onSubmit={addExpense} />
+        )}
+      </div>
+    </div>
+  )
+}
 
-          {parsedRows.length === 0 ? (
-            <form onSubmit={handleSimulatedUpload} className="space-y-4 text-center py-8 max-w-md mx-auto">
-              <div className="border-4 border-dashed border-slate-200 rounded-3xl p-8 hover:border-sky-400 transition cursor-pointer bg-slate-50">
-                <p className="text-4xl mb-2">📁</p>
-                <p className="font-bold text-slate-700 text-sm">اسحب ملف الـ Excel / CSV هنا أو اختره من جهازك</p>
-                <p className="text-xs text-slate-500 mt-1">يجب أن تطابق الأعمدة الترتيب المعتمد في القالب.</p>
-              </div>
-              <button type="submit" className="px-8 py-3.5 gradient-medical text-white font-bold rounded-2xl text-sm shadow-lg btn-medical w-full">رفع الملف وفحصه آلياً</button>
-            </form>
-          ) : (
-            <div className="space-y-4">
-              <h4 className="font-bold text-slate-800">🔎 معاينة نتائج التحقق من السجلات ({parsedRows.length} سجل مروّع):</h4>
-              <div className="overflow-x-auto border rounded-2xl">
-                <table className="w-full text-right text-xs">
-                  <thead>
-                    <tr className="bg-slate-50 text-slate-600 border-b">
-                      <th className="p-3">حالة السطر</th>
-                      <th className="p-3">الاسم / الوصف</th>
-                      <th className="p-3">رقم الجوال / المبلغ</th>
-                      <th className="p-3">رقم الهوية / التاريخ</th>
-                      <th className="p-3">التأمين / التصنيف</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {parsedRows.map((r, idx) => (
-                      <tr key={idx} className={`border-b hover:bg-slate-50 transition ${r.status === 'error' ? 'bg-red-50/40 text-red-900' : r.status === 'warning' ? 'bg-amber-50/40 text-amber-900' : 'bg-emerald-50/20 text-emerald-900'}`}>
-                        <td className="p-3 font-bold">
-                          {r.status === 'valid' && <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded">جاهز للاستيراد</span>}
-                          {r.status === 'warning' && <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded">تحذير: {r.msg}</span>}
-                          {r.status === 'error' && <span className="px-2 py-0.5 bg-red-100 text-red-800 rounded">خطأ: {r.msg}</span>}
-                        </td>
-                        <td className="p-3 font-bold">{r.name || r.desc}</td>
-                        <td className="p-3">{r.phone || (r.amount + ' ر.س')}</td>
-                        <td className="p-3">{r.national_id || r.date}</td>
-                        <td className="p-3">{r.insurance_company || r.category}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+function AccountingSummary({ payments, expenses }) {
+  return (
+    <div className="grid md:grid-cols-2 gap-6">
+      <div className="bg-white rounded-3xl p-6 shadow-xl border border-emerald-100">
+        <h3 className="font-black text-slate-800 mb-4">آخر المدفوعات</h3>
+        {payments.slice(0, 5).map(p => <MoneyRow key={p.id} label={p.notes || p.payment_method} amount={p.amount} date={p.paid_at?.substring(0,10)} positive />)}
+        {payments.length === 0 && <EmptyAdminState icon={Receipt} message="لا توجد مدفوعات" />}
+      </div>
+      <div className="bg-white rounded-3xl p-6 shadow-xl border border-red-100">
+        <h3 className="font-black text-slate-800 mb-4">آخر المصروفات</h3>
+        {expenses.slice(0, 5).map(e => <MoneyRow key={e.id} label={e.description} amount={e.amount} date={e.date} />)}
+        {expenses.length === 0 && <EmptyAdminState icon={DollarSign} message="لا توجد مصروفات" />}
+      </div>
+    </div>
+  )
+}
 
-              <div className="flex gap-2 justify-end pt-2 border-t">
-                <button onClick={handleConfirmSave} disabled={saving || parsedRows.some(x => x.status === 'error')} className="px-6 py-3 gradient-success text-white font-bold rounded-xl shadow-lg disabled:opacity-50 text-sm">
-                  {saving ? '⏳ جاري الحفظ...' : '✓ تأكيد حفظ السجلات المطابقة'}
-                </button>
-                <button onClick={() => setParsedRows([])} className="px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm transition">إلغاء وإعادة المحاولة</button>
-              </div>
-            </div>
-          )}
+function PaymentsList({ payments, records }) {
+  return (
+    <div className="bg-white rounded-3xl p-6 shadow-xl border border-emerald-100">
+      <h3 className="text-xl font-black text-slate-800 mb-4">الإيرادات والمدفوعات</h3>
+      {payments.length === 0 && records.length === 0 ? <EmptyAdminState icon={Receipt} message="لا توجد إيرادات" /> : (
+        <div className="space-y-2">
+          {payments.map(p => <MoneyRow key={p.id} label={p.notes || p.payment_method} amount={p.amount} date={p.paid_at?.substring(0,10)} positive />)}
+          {payments.length === 0 && records.map(r => <MoneyRow key={r.id} label={r.patients?.name || 'كشف'} amount={r.paid_amount} date={r.created_at?.substring(0,10)} positive />)}
         </div>
       )}
+    </div>
+  )
+}
+
+function ExpensesList({ expenses, showForm, setShowForm, form, setForm, onSubmit }) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-2xl font-black text-slate-800">المصروفات</h3>
+        <button onClick={() => setShowForm(!showForm)} className="gradient-danger text-white px-5 py-3 rounded-2xl font-bold shadow-lg">{showForm ? 'إلغاء' : 'مصروف جديد'}</button>
+      </div>
+      {showForm && (
+        <form onSubmit={onSubmit} className="bg-white rounded-3xl p-6 shadow-xl border border-red-100 grid md:grid-cols-2 gap-4">
+          <input required placeholder="وصف المصروف" value={form.description} onChange={(e) => setForm({...form, description: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" />
+          <input required type="number" placeholder="المبلغ" value={form.amount} onChange={(e) => setForm({...form, amount: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" />
+          <select value={form.category} onChange={(e) => setForm({...form, category: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none">
+            {['الرواتب والأجور','الإيجار والمرافق','الأدوية والمستلزمات','معدات وصيانة','تسويق وإعلانات','مصاريف إدارية','مصاريف متنوعة'].map(c => <option key={c}>{c}</option>)}
+          </select>
+          <input type="date" value={form.date} onChange={(e) => setForm({...form, date: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" />
+          <input placeholder="المورد" value={form.vendor} onChange={(e) => setForm({...form, vendor: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" />
+          <select value={form.payment_method} onChange={(e) => setForm({...form, payment_method: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none">
+            <option value="cash">نقدي</option><option value="card">بطاقة</option><option value="transfer">تحويل</option>
+          </select>
+          <textarea placeholder="ملاحظات" value={form.notes} onChange={(e) => setForm({...form, notes: e.target.value})} className="md:col-span-2 px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none resize-none" />
+          <button className="md:col-span-2 gradient-danger text-white py-3 rounded-xl font-bold">حفظ المصروف</button>
+        </form>
+      )}
+      <div className="bg-white rounded-3xl p-6 shadow-xl border border-red-100">
+        {expenses.length === 0 ? <EmptyAdminState icon={DollarSign} message="لا توجد مصروفات" /> : expenses.map(e => <MoneyRow key={e.id} label={e.description} amount={e.amount} date={e.date} />)}
+      </div>
+    </div>
+  )
+}
+
+function MoneyRow({ label, amount, date, positive = false }) {
+  return (
+    <div className="bg-slate-50 rounded-xl p-3 flex items-center justify-between mb-2">
+      <div>
+        <p className="font-bold text-slate-800">{label}</p>
+        <p className="text-xs text-slate-500">{date || '-'}</p>
+      </div>
+      <p className={`font-black ${positive ? 'text-emerald-600' : 'text-red-600'}`}>{positive ? '+' : '-'}{parseFloat(amount || 0).toFixed(0)} ر.س</p>
+    </div>
+  )
+}
+
+function StaffHeader({ title, subtitle, icon: Icon, gradient, onLogout }) {
+  return (
+    <header className={`${gradient} shadow-2xl sticky top-0 z-40`}>
+      <div className="max-w-7xl mx-auto px-4 py-5 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-sm"><Icon className="w-6 h-6 text-white" /></div>
+          <div>
+            <h1 className="text-white font-black text-xl flex items-center gap-2">{title} <LiveBadge small /></h1>
+            <p className="text-white/80 text-xs">{subtitle}</p>
+          </div>
+        </div>
+        <button onClick={onLogout} className="bg-white/20 hover:bg-red-500/40 text-white px-4 py-2 rounded-xl flex items-center gap-2 transition">
+          <LogOut className="w-4 h-4" /> <span className="hidden sm:inline text-sm font-bold">خروج</span>
+        </button>
+      </div>
+    </header>
+  )
+}
+
+function Toast({ msg, gradient }) {
+  return (
+    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 animate-slide-up">
+      <div className={`px-6 py-3 rounded-2xl shadow-2xl font-bold flex items-center gap-2 ${gradient} text-white`}>
+        <Bell className="w-5 h-5" /> {msg}
+      </div>
+    </div>
+  )
+}
+
+function StatusPill({ status }) {
+  const cfg = {
+    pending: 'bg-amber-100 text-amber-700',
+    confirmed: 'bg-emerald-100 text-emerald-700',
+    completed: 'bg-sky-100 text-sky-700',
+    cancelled: 'bg-red-100 text-red-700',
+  }[status] || 'bg-slate-100 text-slate-700'
+  const label = status === 'pending' ? 'قيد التأكيد' : status === 'confirmed' ? 'مؤكد' : status === 'completed' ? 'مكتمل' : status === 'cancelled' ? 'ملغي' : status
+  return <span className={`${cfg} px-3 py-2 rounded-xl text-sm font-bold`}>{label}</span>
+}
+
+function EmptyAdminState({ icon: Icon, message }) {
+  return (
+    <div className="text-center py-10 text-slate-500">
+      <Icon className="w-12 h-12 mx-auto mb-2 text-slate-300" />
+      <p className="font-medium">{message}</p>
     </div>
   )
 }
