@@ -11,19 +11,6 @@ import {
   DollarSign, Receipt, X, ChevronRight, ChevronLeft, Bell
 } from 'lucide-react'
 
-const SAUDI_INSURANCES = [
-  'بوبا العربية',
-  'التعاونية للتأمين',
-  'ميدغلف',
-  'ملاذ للتأمين',
-  'تكافل الراجحي',
-  'أسيج',
-  'الدرع العربي',
-  'سايكو',
-  'الاتحاد للتأمين',
-  'سوليدرتي'
-]
-
 export default function PatientPortal() {
   const { clinicSlug } = useParams()
   const [clinic, setClinic] = useState(null)
@@ -189,7 +176,7 @@ function LoginScreen({ clinic, onBack, onSuccess, onRegister }) {
         .eq('clinic_id', clinic.id).eq('phone', phone.trim()).eq('password', password).limit(1)
       if (!data || data.length === 0) { setError('❌ رقم الجوال أو كلمة المرور غير صحيحة'); setLoading(false); return }
       onSuccess({ ...data[0], clinics: clinic })
-    } catch (err) { setError('❌ حصل خطأ، حاول مرة أخرى') }
+    } catch (err) { setError('❌ صار خطأ، حاول مرة أخرى') }
     finally { setLoading(false) }
   }
 
@@ -238,7 +225,7 @@ function LoginScreen({ clinic, onBack, onSuccess, onRegister }) {
           </form>
 
           <div className="text-center mt-6 pt-6 border-t border-slate-200">
-            <p className="text-slate-600 text-sm">لسه ما عندكش حساب؟ <button onClick={onRegister} className="text-sky-600 font-bold hover:underline">سجّل الآن</button></p>
+            <p className="text-slate-600 text-sm">ما عندك حساب؟ <button onClick={onRegister} className="text-sky-600 font-bold hover:underline">سجّل الآن</button></p>
           </div>
         </div>
       </div>
@@ -252,7 +239,7 @@ function LoginScreen({ clinic, onBack, onSuccess, onRegister }) {
 function RegisterScreen({ clinic, onBack, onSuccess, onLogin }) {
   const [form, setForm] = useState({
     name: '', phone: '', national_id: '', date_of_birth: '', gender: 'male',
-    blood_type: '', allergies: '', medical_notes: '', password: '', password_confirm: '', insurance_company: '', insurance_policy_no: ''
+    blood_type: '', allergies: '', medical_notes: '', password: '', password_confirm: ''
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -275,18 +262,17 @@ function RegisterScreen({ clinic, onBack, onSuccess, onLogin }) {
         clinic_id: clinic.id, name: form.name.trim(), phone: form.phone.trim(),
         national_id: form.national_id.trim() || null, date_of_birth: form.date_of_birth || null,
         gender: form.gender, blood_type: form.blood_type || null,
-        allergies: form.allergies || null, medical_notes: form.medical_notes || null, password: form.password,
-        insurance_company: form.insurance_company || null, insurance_policy_no: form.insurance_policy_no || null
+        allergies: form.allergies || null, medical_notes: form.medical_notes || null, password: form.password
       }]).select().single()
       if (insertError) throw insertError
       onSuccess({ ...data, clinics: clinic })
-    } catch (err) { setError('❌ ' + (err.message || 'حصل خطأ')) }
+    } catch (err) { setError('❌ ' + (err.message || 'صار خطأ')) }
     finally { setLoading(false) }
   }
 
   const goToStep2 = (e) => {
     e.preventDefault(); setError('')
-    if (!form.name || !form.phone || !form.password) { setError('❌ املأ كل الحقول الإلزامية'); return }
+    if (!form.name || !form.phone || !form.password) { setError('❌ عبّئ كل الحقول الإلزامية'); return }
     setStep(2)
   }
 
@@ -363,21 +349,6 @@ function RegisterScreen({ clinic, onBack, onSuccess, onLogin }) {
               <Field label="ملاحظات طبية" icon={<FileText className="w-5 h-5" />}>
                 <textarea value={form.medical_notes} onChange={(e) => update('medical_notes', e.target.value)} placeholder="أمراض مزمنة، أدوية..." rows="3" className="medical-input resize-none" />
               </Field>
-
-              <Field label="شركة التأمين" icon={<ShieldCheck className="w-5 h-5 text-indigo-500" />}>
-                <select value={form.insurance_company} onChange={(e) => update('insurance_company', e.target.value)} className="medical-input">
-                  <option value="">لا يوجد تأمين صحي</option>
-                  {SAUDI_INSURANCES.map(ins => (
-                    <option key={ins} value={ins}>{ins}</option>
-                  ))}
-                </select>
-              </Field>
-
-              {form.insurance_company && (
-                <Field label="رقم بوليصة التأمين" icon={<CreditCard className="w-5 h-5 text-indigo-500" />}>
-                  <input type="text" value={form.insurance_policy_no} onChange={(e) => update('insurance_policy_no', e.target.value)} placeholder="رقم بوليصة التأمين الخاصة بك" className="medical-input" />
-                </Field>
-              )}
 
               {error && <div className="bg-red-50 border-2 border-red-200 text-red-700 p-4 rounded-2xl text-sm font-medium animate-fade-in">{error}</div>}
 
@@ -479,7 +450,7 @@ function Dashboard({ patient, clinic, onLogout, setPatient }) {
   const cancelAppointment = async (id) => {
     if (!confirm('هل تريد إلغاء هذا الموعد؟')) return
     await supabase.from('appointments').update({ status: 'cancelled' }).eq('id', id)
-    // التحديث هيتم تلقائياً عبر Realtime
+    // التحديث سيتم تلقائياً عبر Realtime
   }
 
   const today = new Date().toISOString().split('T')[0]
@@ -538,8 +509,6 @@ function Dashboard({ patient, clinic, onLogout, setPatient }) {
             { id: 'home', label: 'الرئيسية', icon: Home },
             { id: 'appointments', label: 'مواعيدي', icon: Calendar },
             { id: 'book', label: 'حجز موعد', icon: Plus },
-            { id: 'services', label: 'الخدمات والأسعار', icon: DollarSign },
-            { id: 'family', label: 'الملف العائلي', icon: Users },
             { id: 'complaints', label: 'شكاوي', icon: AlertCircle },
             { id: 'profile', label: 'بياناتي', icon: User },
           ].map(tab => (
@@ -563,8 +532,6 @@ function Dashboard({ patient, clinic, onLogout, setPatient }) {
             {activeTab === 'home' && <HomeTab patient={patient} upcoming={upcoming} past={past} complaints={complaints} setActiveTab={setActiveTab} onViewApt={setViewingApt} />}
             {activeTab === 'appointments' && <AppointmentsTab upcoming={upcoming} past={past} onCancel={cancelAppointment} onView={setViewingApt} />}
             {activeTab === 'book' && <BookAppointmentTab patient={patient} clinic={clinic} onSuccess={() => { loadData(); setActiveTab('appointments'); }} />}
-            {activeTab === 'services' && <ServicesTab patient={patient} clinic={clinic} />}
-            {activeTab === 'family' && <FamilyTab patient={patient} clinic={clinic} setPatient={setPatient} />}
             {activeTab === 'complaints' && <ComplaintsTab patient={patient} clinic={clinic} complaints={complaints} onUpdate={loadData} />}
             {activeTab === 'profile' && <ProfileTab patient={patient} clinic={clinic} setPatient={setPatient} />}
           </>
@@ -724,7 +691,6 @@ function BookAppointmentTab({ patient, clinic, onSuccess }) {
   const [selectedTime, setSelectedTime] = useState('')
   const [appointmentType, setAppointmentType] = useState('first_visit')
   const [notes, setNotes] = useState('')
-  const [beneficiary, setBeneficiary] = useState('self') // 'self' or family member ID/name
   const [availableSlots, setAvailableSlots] = useState([])
   const [busySlots, setBusySlots] = useState([])
   const [doctorSchedule, setDoctorSchedule] = useState([])
@@ -796,7 +762,7 @@ function BookAppointmentTab({ patient, clinic, onSuccess }) {
 
   const submit = async (e) => {
     e.preventDefault()
-    if (!selectedDoctor || !selectedDate || !selectedTime) { alert('⚠️ اختار كل البيانات'); return }
+    if (!selectedDoctor || !selectedDate || !selectedTime) { alert('⚠️ اختر كل البيانات'); return }
     setLoading(true)
 
     const { data: conflict } = await supabase.from('appointments').select('id')
@@ -805,7 +771,7 @@ function BookAppointmentTab({ patient, clinic, onSuccess }) {
 
     if (conflict?.length > 0) {
       setLoading(false)
-      alert('❌ تم حجز هذا الوقت للتو، اختار وقت آخر')
+      alert('❌ تم حجز هذا الوقت للتو، اختر وقت آخر')
       await computeAvailableSlots(); setSelectedTime(''); return
     }
 
@@ -940,7 +906,7 @@ function BookAppointmentTab({ patient, clinic, onSuccess }) {
               <ChevronRight className="w-5 h-5 text-sky-600" />
             </button>
             <h4 className="font-black text-slate-800 text-lg">
-              {currentMonth.toLocaleDateString('ar-EG', {month: 'long', year: 'numeric'})}
+              {currentMonth.toLocaleDateString('ar-SA', {month: 'long', year: 'numeric'})}
             </h4>
             <button onClick={() => setCurrentMonth(new Date(year, month + 1, 1))} className="bg-white hover:bg-sky-100 p-2 rounded-xl shadow-sm transition">
               <ChevronLeft className="w-5 h-5 text-sky-600" />
@@ -993,7 +959,7 @@ function BookAppointmentTab({ patient, clinic, onSuccess }) {
             <div className="text-center py-12 bg-slate-50 rounded-2xl">
               <div className="text-6xl mb-3">😔</div>
               <p className="text-slate-700 font-bold mb-1">الطبيب غير متاح في هذا اليوم</p>
-              <p className="text-slate-500 text-sm">اختار يوم آخر</p>
+              <p className="text-slate-500 text-sm">اختر يوم آخر</p>
             </div>
           ) : (
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
@@ -1064,7 +1030,7 @@ function BookAppointmentTab({ patient, clinic, onSuccess }) {
               <div className="flex items-center gap-2 bg-white/60 rounded-xl p-2">
                 <Calendar className="w-4 h-4 text-emerald-600" />
                 <span className="text-slate-600">التاريخ:</span>
-                <strong className="text-slate-800">{new Date(selectedDate).toLocaleDateString('ar-EG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</strong>
+                <strong className="text-slate-800">{new Date(selectedDate).toLocaleDateString('ar-SA', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</strong>
               </div>
               <div className="flex items-center gap-2 bg-white/60 rounded-xl p-2">
                 <Clock className="w-4 h-4 text-cyan-600" />
@@ -1291,8 +1257,6 @@ function ProfileTab({ patient, clinic, setPatient }) {
   const [form, setForm] = useState({
     name: patient.name || '', phone: patient.phone || '', blood_type: patient.blood_type || '',
     allergies: patient.allergies || '', medical_notes: patient.medical_notes || '',
-    insurance_company: patient.insurance_company || '',
-    insurance_policy_no: patient.insurance_policy_no || ''
   })
   const [passwordForm, setPasswordForm] = useState({ current: '', new: '', confirm: '' })
   const [loading, setLoading] = useState(false)
@@ -1392,267 +1356,6 @@ function EmptyState({ icon: Icon, message }) {
     <div className="text-center py-12">
       <Icon className="w-16 h-16 mx-auto text-slate-300 mb-3 animate-float" />
       <p className="text-slate-600 font-medium">{message}</p>
-    </div>
-  )
-}
-
-
-// ═══════════════════════════════════════════════════════════
-// ServicesTab - لعرض الخدمات الطبية وأسعارها والخصومات للمريض
-// ═══════════════════════════════════════════════════════════
-function ServicesTab({ patient, clinic }) {
-  const [services, setServices] = useState([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    supabase.from('clinic_services').select('*').eq('clinic_id', clinic.id).eq('is_active', true).order('name')
-      .then(({ data }) => {
-        setServices(data || [])
-        setLoading(false)
-      })
-  }, [])
-
-  if (loading) {
-    return (
-      <div className="text-center py-20">
-        <div className="spinner-medical w-16 h-16 mx-auto"></div>
-        <p className="mt-4 font-bold text-slate-600">جاري تحميل الخدمات...</p>
-      </div>
-    )
-  }
-
-  const isInsured = !!patient?.insurance_company
-
-  return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="glass rounded-3xl p-6 shadow-xl border border-sky-100 bg-white/70">
-        <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2 mb-2">
-          <DollarSign className="w-7 h-7 text-sky-600" /> الخدمات المتاحة وأسعارها
-        </h2>
-        <p className="text-slate-600 text-sm">
-          تصفح قائمة الخدمات والأسعار المعتمدة في عيادتنا.
-          {isInsured && (
-            <span className="text-indigo-600 font-bold block mt-1">
-              ✅ لقد تم تطبيق تسعيرة التأمين الخاص بك لشركة ({patient.insurance_company}) تلقائياً!
-            </span>
-          )}
-        </p>
-      </div>
-
-      <div className="grid md:grid-cols-2 gap-4">
-        {services.length === 0 ? (
-          <div className="md:col-span-2 text-center py-12 text-slate-500 bg-white rounded-3xl shadow">
-            <p>لا توجد خدمات مضافة حالياً</p>
-          </div>
-        ) : (
-          services.map(s => {
-            const hasInsurancePrice = s.insurance_price && s.insurance_price > 0
-            const hasDiscount = s.discount_pct && s.discount_pct > 0
-            const displayPrice = isInsured && hasInsurancePrice ? s.insurance_price : s.price
-            const discountAmt = hasDiscount ? (displayPrice * s.discount_pct / 100) : 0
-            const finalPrice = displayPrice - discountAmt
-
-            return (
-              <div key={s.id} className="bg-white rounded-2xl p-5 shadow-lg border border-slate-100 hover:border-sky-200 hover:shadow-xl transition flex flex-col justify-between">
-                <div>
-                  <h3 className="font-bold text-slate-800 text-lg mb-1">{s.name}</h3>
-                  {s.description && <p className="text-slate-600 text-sm mb-4 leading-relaxed">{s.description}</p>}
-                </div>
-
-                <div className="border-t border-slate-100 pt-3 space-y-2 text-sm mt-4">
-                  {isInsured && hasInsurancePrice ? (
-                    <>
-                      <p className="flex justify-between text-slate-500 line-through">
-                        <span>السعر العادي:</span>
-                        <span>{s.price} ر.س</span>
-                      </p>
-                      <p className="flex justify-between font-bold text-indigo-600">
-                        <span>سعر التأمين:</span>
-                        <span>{s.insurance_price} ر.س</span>
-                      </p>
-                    </>
-                  ) : (
-                    <p className="flex justify-between font-bold text-slate-700">
-                      <span>السعر الأساسي:</span>
-                      <span>{s.price} ر.س</span>
-                    </p>
-                  )}
-
-                  {hasDiscount && (
-                    <p className="flex justify-between text-emerald-600 font-bold">
-                      <span>الخصم ({s.discount_pct}%):</span>
-                      <span>-{discountAmt.toFixed(0)} ر.س</span>
-                    </p>
-                  )}
-
-                  <p className="flex justify-between font-black text-slate-800 text-base pt-2 border-t border-dashed">
-                    <span>الصافي المطلوب:</span>
-                    <span className="text-emerald-600 text-lg">{finalPrice.toFixed(0)} ر.س</span>
-                  </p>
-                </div>
-              </div>
-            )
-          })
-        )}
-      </div>
-    </div>
-  )
-}
-
-
-// ═══════════════════════════════════════════════════════════
-// FamilyTab - إدارة الملف العائلي للمريض الرئيسي (المرحلة 9)
-// ═══════════════════════════════════════════════════════════
-function FamilyTab({ patient, clinic, setPatient }) {
-  const [showAddForm, setShowAddForm] = useState(false)
-  const [form, setForm] = useState({ name: '', relation: 'son', national_id: '', gender: 'male', date_of_birth: '' })
-  const [loading, setLoading] = useState(false)
-
-  const handleAddMember = async (e) => {
-    e.preventDefault()
-    if (!form.name) return
-    setLoading(true)
-
-    const currentMembers = patient.family_members || []
-    const updatedMembers = [...currentMembers, { ...form, id: 'fam-' + Date.now() }]
-
-    const { data, error } = await supabase
-      .from('patients')
-      .update({ family_members: updatedMembers })
-      .eq('id', patient.id)
-      .select()
-      .single()
-
-    setLoading(false)
-    if (!error) {
-      const updated = { ...data, clinics: clinic }
-      setPatient(updated)
-      localStorage.setItem(`patient_session_${clinic.id}`, JSON.stringify(updated))
-      setForm({ name: '', relation: 'son', national_id: '', gender: 'male', date_of_birth: '' })
-      setShowAddForm(false)
-      alert('✅ تم إضافة تابع جديد لملفك العائلي بنجاح!')
-    } else {
-      alert('❌ فشل الإضافة: ' + error.message)
-    }
-  }
-
-  const handleDeleteMember = async (id) => {
-    if (!confirm('هل تريد حذف هذا التابع من ملفك العائلي؟')) return
-
-    const currentMembers = patient.family_members || []
-    const updatedMembers = currentMembers.filter(m => m.id !== id)
-
-    const { data, error } = await supabase
-      .from('patients')
-      .update({ family_members: updatedMembers })
-      .eq('id', patient.id)
-      .select()
-      .single()
-
-    if (!error) {
-      const updated = { ...data, clinics: clinic }
-      setPatient(updated)
-      localStorage.setItem(`patient_session_${clinic.id}`, JSON.stringify(updated))
-      alert('✅ تم حذف التابع بنجاح.')
-    }
-  }
-
-  const relationsMap = {
-    son: 'ابن', daughter: 'ابنة', wife: 'زوجة', husband: 'زوج', other: 'قريب آخر'
-  }
-
-  return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="glass rounded-3xl p-6 shadow-xl border border-sky-100 bg-white/70">
-        <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
-          <div>
-            <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
-              <Users className="w-7 h-7 text-sky-600" /> إدارة الملف الطبي العائلي
-            </h2>
-            <p className="text-slate-600 text-sm mt-1">أضف زوجتك وأبنائك لحجز المواعيد لهم وإشراكهم في التأمين الصحي العائلي.</p>
-          </div>
-          <button onClick={() => setShowAddForm(!showAddForm)} className="gradient-success text-white px-5 py-3 rounded-2xl font-bold shadow-xl btn-medical flex items-center gap-2">
-            <Plus className="w-5 h-5" /> {showAddForm ? 'إلغاء' : 'إضافة تابع جديد'}
-          </button>
-        </div>
-      </div>
-
-      {showAddForm && (
-        <div className="bg-white rounded-3xl p-6 shadow-xl border border-sky-100 animate-slide-up">
-          <h3 className="text-lg font-bold text-slate-800 mb-4">➕ إضافة فرد عائلي جديد</h3>
-          <form onSubmit={handleAddMember} className="grid md:grid-cols-2 gap-4">
-            <div className="flex flex-col">
-              <label className="text-xs font-bold text-slate-600 mb-1">الاسم الكامل للتابع *</label>
-              <input required placeholder="مثال: أحمد خالد بن عبدالله" value={form.name} onChange={(e) => setForm({...form, name: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl outline-none" />
-            </div>
-
-            <div className="flex flex-col">
-              <label className="text-xs font-bold text-slate-600 mb-1">صلة القرابة</label>
-              <select value={form.relation} onChange={(e) => setForm({...form, relation: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl outline-none font-bold">
-                {Object.entries(relationsMap).map(([key, val]) => (
-                  <option key={key} value={key}>{val}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex flex-col">
-              <label className="text-xs font-bold text-slate-600 mb-1">رقم الهوية الوطنية / الإقامة</label>
-              <input placeholder="اختياري" value={form.national_id} onChange={(e) => setForm({...form, national_id: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl outline-none" />
-            </div>
-
-            <div className="flex flex-col">
-              <label className="text-xs font-bold text-slate-600 mb-1">تاريخ الميلاد</label>
-              <input type="date" value={form.date_of_birth} onChange={(e) => setForm({...form, date_of_birth: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl outline-none" />
-            </div>
-
-            <div className="md:col-span-2">
-              <label className="block text-sm font-bold text-slate-700 mb-2">الجنس</label>
-              <div className="grid grid-cols-2 gap-3">
-                <button type="button" onClick={() => setForm({...form, gender: 'male'})}
-                  className={`py-3.5 rounded-xl font-bold transition ${form.gender === 'male' ? 'gradient-medical text-white shadow-md' : 'bg-slate-50 text-slate-700 border border-slate-200'}`}>👨 ذكر</button>
-                <button type="button" onClick={() => setForm({...form, gender: 'female'})}
-                  className={`py-3.5 rounded-xl font-bold transition ${form.gender === 'female' ? 'gradient-success text-white shadow-md' : 'bg-slate-50 text-slate-700 border border-slate-200'}`}>👩 أنثى</button>
-              </div>
-            </div>
-
-            <button type="submit" disabled={loading} className="md:col-span-2 py-3.5 gradient-success text-white font-bold rounded-xl shadow-lg transition disabled:opacity-50">
-              {loading ? '⏳ جاري الإضافة...' : '✓ تأكيد الإضافة للملف العائلي'}
-            </button>
-          </form>
-        </div>
-      )}
-
-      {/* قائمة أفراد العائلة المضافين */}
-      <div className="grid sm:grid-cols-2 gap-4">
-        {(!patient.family_members || patient.family_members.length === 0) ? (
-          <div className="sm:col-span-2 bg-white rounded-3xl p-12 text-center text-slate-500 shadow border border-slate-100">
-            <Users className="w-12 h-12 mx-auto mb-2 text-slate-300 animate-pulse" />
-            <p className="font-bold text-slate-700">لم تقم بإضافة أي تابع لملفك بعد</p>
-            <p className="text-xs text-slate-500 mt-1">بإمكانك إضافة الأبناء والزوجة بضغطة زر وتسهيل الحجز لهم.</p>
-          </div>
-        ) : (
-          patient.family_members.map(m => (
-            <div key={m.id} className="bg-white rounded-2xl p-5 shadow-md border border-slate-100 flex items-center justify-between hover:border-sky-100 transition">
-              <div className="flex items-center gap-3">
-                <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-bold text-xl ${m.gender === 'female' ? 'bg-pink-50 text-pink-500' : 'bg-sky-50 text-sky-500'}`}>
-                  {m.gender === 'female' ? '👩' : '👨'}
-                </div>
-                <div>
-                  <h4 className="font-bold text-slate-800">{m.name}</h4>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    <span className="font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">{relationsMap[m.relation] || m.relation}</span>
-                    {m.date_of_birth && ` • تاريخ الميلاد: ${m.date_of_birth}`}
-                  </p>
-                  {m.national_id && <p className="text-xs text-slate-400 mt-1">الهوية: {m.national_id}</p>}
-                </div>
-              </div>
-              <button onClick={() => handleDeleteMember(m.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-lg transition" title="حذف التابع">
-                <Trash2 className="w-4 h-4 inline" />
-              </button>
-            </div>
-          ))
-        )}
-      </div>
     </div>
   )
 }
