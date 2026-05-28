@@ -29,10 +29,10 @@ export default function OwnerPortal() {
     <div className="min-h-screen relative overflow-hidden">
       {view === 'login' && (
         <>
-          <div className="fixed inset-0 bg-gradient-to-br from-slate-900 via-sky-900 to-slate-900 -z-10"></div>
+          <div className="fixed inset-0 bg-pattern-subtle -z-10"></div>
           <div className="fixed inset-0 overflow-hidden -z-10 pointer-events-none">
-            <div className="floating-shape w-96 h-96 bg-sky-500 top-10 -right-20"></div>
-            <div className="floating-shape w-80 h-80 bg-cyan-500 bottom-20 -left-20" style={{animationDelay: '2s'}}></div>
+            <div className="floating-shape w-96 h-96 bg-sky-300 top-10 -right-20"></div>
+            <div className="floating-shape w-80 h-80 bg-cyan-300 bottom-20 -left-20" style={{animationDelay: '2s'}}></div>
           </div>
           <OwnerLogin onSuccess={handleSuccess} />
         </>
@@ -53,58 +53,59 @@ function OwnerLogin({ onSuccess }) {
     try {
       const { data } = await supabase.from('admin_users').select('*')
         .eq('username', credentials.username.trim()).eq('password', credentials.password)
-        .eq('role', 'owner').limit(1)
+        .eq('role', 'owner').eq('is_active', true).limit(1)
       if (data?.length > 0) onSuccess(data[0])
-      else setError('❌ بيانات الدخول غير صحيحة')
-    } catch (err) { setError('❌ حصل خطأ') }
+      else setError('بيانات الدخول غير صحيحة')
+    } catch (err) { setError('صار خطأ، حاول مرة ثانية') }
     finally { setLoading(false) }
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 page-enter">
+    <div className="min-h-screen flex items-center justify-center p-4 page-enter" dir="rtl">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="inline-block mb-4 relative">
-            <div className="absolute inset-0 bg-sky-500/40 rounded-full blur-2xl animate-pulse"></div>
-            <div className="relative w-24 h-24 mx-auto gradient-medical rounded-3xl shadow-2xl flex items-center justify-center">
-              <Crown className="w-12 h-12 text-white" />
-            </div>
+          <div className="inline-flex items-center justify-center w-24 h-24 mx-auto rounded-3xl bg-gradient-to-br from-primary-500 to-accent-500 shadow-large icon-pulse-ring mb-5">
+            <Crown className="w-12 h-12 text-white" />
           </div>
-          <h1 className="text-4xl font-black text-white mb-2">المالك</h1>
-          <p className="text-white/70">لوحة تحكم صاحب النظام</p>
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-primary-50 border border-primary-100 rounded-full mb-4">
+            <ShieldCheck className="w-4 h-4 text-primary-600" />
+            <span className="text-primary-700 font-bold text-xs">بوابة مالك النظام</span>
+          </div>
+          <h1 className="text-4xl font-black text-slate-800 mb-2">لوحة المالك</h1>
+          <p className="text-slate-500">إدارة العيادات والاشتراكات من مكان واحد</p>
         </div>
 
-        <div className="glass-dark rounded-3xl p-8 shadow-2xl animate-slide-up border border-sky-500/20">
-          <form onSubmit={handleLogin} className="space-y-4">
+        <div className="bg-white rounded-3xl p-8 shadow-large border border-slate-100 animate-slide-up">
+          <form onSubmit={handleLogin} className="space-y-5">
             <div>
-              <label className="block text-sm font-bold text-sky-200 mb-2">اسم المستخدم</label>
+              <label className="block text-sm font-bold text-slate-700 mb-2">اسم المستخدم</label>
               <div className="relative">
-                <User className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-sky-400/60" />
-                <input type="text" value={credentials.username} onChange={(e) => setCredentials({...credentials, username: e.target.value})} placeholder="owner" required
-                  className="w-full pr-12 pl-4 py-4 bg-white/5 border-2 border-sky-500/30 rounded-2xl text-white placeholder-white/30 text-right focus:border-sky-400 outline-none transition font-medium" />
+                <User className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-primary-500" />
+                <input type="text" value={credentials.username} onChange={(e) => setCredentials({...credentials, username: e.target.value})} placeholder="1111" required
+                  className="w-full pr-12 pl-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl text-slate-800 placeholder-slate-400 text-right focus:border-primary-400 focus:bg-white outline-none transition font-medium" />
               </div>
             </div>
             <div>
-              <label className="block text-sm font-bold text-sky-200 mb-2">كلمة المرور</label>
+              <label className="block text-sm font-bold text-slate-700 mb-2">كلمة المرور</label>
               <div className="relative">
-                <Lock className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-sky-400/60" />
-                <input type={showPassword ? 'text' : 'password'} value={credentials.password} onChange={(e) => setCredentials({...credentials, password: e.target.value})} placeholder="••••••" required
-                  className="w-full pr-12 pl-12 py-4 bg-white/5 border-2 border-sky-500/30 rounded-2xl text-white placeholder-white/30 text-right focus:border-sky-400 outline-none transition font-medium" />
-                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute left-4 top-1/2 -translate-y-1/2 text-sky-400/60 hover:text-sky-300">
+                <Lock className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-primary-500" />
+                <input type={showPassword ? 'text' : 'password'} value={credentials.password} onChange={(e) => setCredentials({...credentials, password: e.target.value})} placeholder="1111" required
+                  className="w-full pr-12 pl-12 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl text-slate-800 placeholder-slate-400 text-right focus:border-primary-400 focus:bg-white outline-none transition font-medium" />
+                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-primary-600">
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
             </div>
 
-            {error && <div className="bg-red-500/20 border-2 border-red-500/40 text-red-200 p-4 rounded-2xl text-sm font-medium animate-fade-in">{error}</div>}
+            {error && <div className="bg-red-50 border-2 border-red-100 text-red-700 p-4 rounded-2xl text-sm font-bold animate-fade-in">❌ {error}</div>}
 
-            <button type="submit" disabled={loading} className="w-full py-4 gradient-medical text-white font-bold rounded-2xl btn-medical disabled:opacity-50 shadow-xl text-lg">
-              <Crown className="w-5 h-5 inline mr-1" /> {loading ? '⏳ جاري الدخول...' : 'دخول المالك'}
+            <button type="submit" disabled={loading} className="w-full py-4 bg-gradient-to-br from-primary-500 to-accent-500 text-white font-bold rounded-2xl disabled:opacity-50 shadow-medium hover:shadow-large transition text-lg flex items-center justify-center gap-2">
+              <Crown className="w-5 h-5" /> {loading ? 'جاري الدخول...' : 'دخول المالك'}
             </button>
           </form>
 
-          <div className="text-center mt-6">
-            <Link to="/" className="text-sky-300/70 hover:text-sky-200 text-sm inline-flex items-center gap-1">
+          <div className="text-center mt-6 pt-6 border-t border-slate-100">
+            <Link to="/" className="text-slate-500 hover:text-primary-600 text-sm inline-flex items-center gap-1 font-bold">
               <Home className="w-4 h-4" /> الرئيسية
             </Link>
           </div>
@@ -163,19 +164,19 @@ function OwnerDashboard({ user, onLogout }) {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-sky-50 page-enter" dir="rtl">
-      <header className="bg-gradient-to-r from-slate-900 via-sky-900 to-cyan-900 shadow-2xl sticky top-0 z-40">
+    <div className="min-h-screen bg-gradient-to-br from-sky-50 via-cyan-50 to-slate-50 page-enter" dir="rtl">
+      <header className="bg-gradient-to-br from-primary-600 via-sky-600 to-accent-600 shadow-2xl sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 py-5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 bg-sky-500/20 rounded-2xl flex items-center justify-center backdrop-blur-sm">
-                <Crown className="w-6 h-6 text-sky-300" />
+              <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-sm">
+                <Crown className="w-6 h-6 text-white" />
               </div>
               <div>
                 <h1 className="text-white font-black text-xl flex items-center gap-2">
                   لوحة المالك <LiveBadge small />
                 </h1>
-                <p className="text-sky-200/80 text-xs">{user.full_name || user.username}</p>
+                <p className="text-white/80 text-xs">{user.full_name || user.username}</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -274,7 +275,7 @@ function ClinicCard({ clinic, stats, onDelete, onEdit, onStatusChange }) {
               {clinic.phone && <div className="flex items-center gap-2"><Phone className="w-4 h-4 text-slate-400" /> {clinic.phone}</div>}
               {clinic.email && <div className="flex items-center gap-2"><Mail className="w-4 h-4 text-slate-400" /> {clinic.email}</div>}
               {clinic.address && <div className="flex items-center gap-2"><MapPin className="w-4 h-4 text-slate-400" /> {clinic.address}</div>}
-              <div className="flex items-center gap-2"><Calendar className="w-4 h-4 text-slate-400" /> {new Date(clinic.created_at).toLocaleDateString('ar-EG')}</div>
+              <div className="flex items-center gap-2"><Calendar className="w-4 h-4 text-slate-400" /> {new Date(clinic.created_at).toLocaleDateString('ar-SA')}</div>
             </div>
           </div>
         </div>
@@ -378,18 +379,18 @@ function ClinicForm({ clinic, onSuccess, onCancel }) {
         if (err) throw err
 
         await supabase.from('admin_users').insert([{
-          clinic_id: newClinic.id, username: 'admin', password: 'admin123',
+          clinic_id: newClinic.id, username: '1111', password: '1111',
           full_name: 'مدير العيادة', role: 'clinic_admin'
         }])
         await supabase.from('doctors').insert([{
           clinic_id: newClinic.id, name: 'د. مثال', specialization: 'عام',
-          username: 'doctor', password: '123456'
+          username: '1111', password: '1111'
         }])
 
         onSuccess()
-        alert(`✓ تم إنشاء العيادة!\n\n🔗 ${window.location.origin}/${newClinic.slug}\n\n🔐 admin / admin123\n🔐 doctor / 123456`)
+        alert(`✓ تم إنشاء العيادة!\n\n🔗 ${window.location.origin}/${newClinic.slug}\n\n🔐 الكل / 1111`)
       }
-    } catch (err) { setError('❌ ' + (err.message || 'حصل خطأ')) }
+    } catch (err) { setError('❌ ' + (err.message || 'صار خطأ')) }
     finally { setLoading(false) }
   }
 
