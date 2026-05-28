@@ -8,7 +8,7 @@ import {
   User, Lock, LogOut, Building2, Plus, Phone, Mail, MapPin,
   Calendar, Trash2, Edit, Crown, Sparkles, Eye, EyeOff,
   Users, Activity, TrendingUp, CheckCircle, Clock, Copy,
-  ExternalLink, Settings, Home, Save, X, Stethoscope
+  ExternalLink, Settings, Home, Save, X, Stethoscope, ShieldCheck
 } from 'lucide-react'
 
 export default function OwnerPortal() {
