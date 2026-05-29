@@ -2212,6 +2212,7 @@ function AccountantDashboard({ user, clinic, onLogout }) {
   const [expenses, setExpenses] = useState([])
   const [workSessions, setWorkSessions] = useState([])
   const [tab, setTab] = useState('dashboard')
+  const [notification, setNotification] = useState(null)
   const [showExpenseForm, setShowExpenseForm] = useState(false)
   const [expenseForm, setExpenseForm] = useState({ description: '', amount: '', category: 'مصاريف متنوعة', payment_method: 'cash', date: new Date().toISOString().split('T')[0], vendor: '', notes: '' })
 
