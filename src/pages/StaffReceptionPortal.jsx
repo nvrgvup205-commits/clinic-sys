@@ -1265,7 +1265,6 @@ function DoctorDashboard({ user, clinic, onLogout }) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-cyan-50 page-enter" dir="rtl">
-      <RealtimeToast notification={notification} />
       {notification && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 animate-slide-up">
           <div className="px-6 py-3 rounded-2xl shadow-2xl font-bold gradient-success text-white flex items-center gap-2">
