@@ -1743,7 +1743,6 @@ function ReceptionDashboard({ user, clinic, onLogout }) {
   const [selectedPaymentRequest, setSelectedPaymentRequest] = useState(null)
   const [paymentForm, setPaymentForm] = useState({ service_id: '', amount: '', payment_method: 'cash', insurance_company_id: '', reference_no: '', notes: '' })
   const [loading, setLoading] = useState(true)
-  const [notification, setNotification] = useState(null)
   const work = useWorkSession({ clinic, userType: 'admin_user', userId: user.id, userName: user.full_name || user.username, role: 'receptionist' })
 
   useEffect(() => { if (work.active) loadReceptionData() }, [work.active])
