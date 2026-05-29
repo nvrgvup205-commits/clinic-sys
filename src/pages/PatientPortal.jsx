@@ -65,9 +65,7 @@ export default function PatientPortal() {
         <div className="glass rounded-3xl p-12 max-w-md w-full text-center shadow-2xl">
           <div className="text-7xl mb-4">😕</div>
           <h2 className="text-2xl font-black text-slate-800 mb-2">العيادة غير موجودة</h2>
-          <Link to="/" className="inline-flex items-center gap-2 gradient-medical text-white px-6 py-3 rounded-2xl font-bold">
-            <Home className="w-5 h-5" /> الرئيسية
-          </Link>
+
         </div>
       </div>
     )
@@ -149,11 +147,7 @@ function WelcomeScreen({ clinic, onLogin, onRegister }) {
           </button>
         </div>
 
-        <div className="text-center mt-8">
-          <Link to="/" className="text-white/70 hover:text-white text-sm inline-flex items-center gap-1">
-            <Home className="w-4 h-4" /> عيادة أخرى
-          </Link>
-        </div>
+
       </div>
     </div>
   )
@@ -401,6 +395,8 @@ function Field({ label, icon, children }) {
 function Dashboard({ patient, clinic, onLogout, setPatient }) {
   const [appointments, setAppointments] = useState([])
   const [complaints, setComplaints] = useState([])
+  const [invoices, setInvoices] = useState([])
+  const [payments, setPayments] = useState([])
   const [activeTab, setActiveTab] = useState('home')
   const [loading, setLoading] = useState(true)
   const [viewingApt, setViewingApt] = useState(null)
@@ -426,6 +422,36 @@ function Dashboard({ patient, clinic, onLogout, setPatient }) {
     }
   })
 
+  useRealtime('medical_records', (payload) => {
+    if (payload.new?.patient_id === patient.id || payload.old?.patient_id === patient.id) {
+      loadData()
+      if (payload.eventType === 'INSERT') {
+        setNewNotification({ type: 'complete', msg: '✓ تم حفظ تقرير الكشف' })
+        setTimeout(() => setNewNotification(null), 5000)
+      }
+    }
+  })
+
+  useRealtime('payments', (payload) => {
+    if (payload.new?.patient_id === patient.id || payload.old?.patient_id === patient.id) {
+      loadData()
+      if (payload.eventType === 'INSERT') {
+        setNewNotification({ type: 'paid', msg: '💳 تم تسجيل دفعة جديدة' })
+        setTimeout(() => setNewNotification(null), 5000)
+      }
+    }
+  })
+
+  useRealtime('invoices', (payload) => {
+    if (payload.new?.patient_id === patient.id || payload.old?.patient_id === patient.id) {
+      loadData()
+      if (payload.eventType === 'INSERT') {
+        setNewNotification({ type: 'invoice', msg: `🧾 تم إصدار فاتورة ${payload.new?.invoice_no || ''}` })
+        setTimeout(() => setNewNotification(null), 5000)
+      }
+    }
+  })
+
   // 🔴 Realtime - يستمع للشكاوى
   useRealtime('complaints', (payload) => {
     if (payload.new?.patient_id === patient.id || payload.old?.patient_id === patient.id) {
@@ -438,12 +464,16 @@ function Dashboard({ patient, clinic, onLogout, setPatient }) {
   })
 
   const loadData = async () => {
-    const [apptsRes, complsRes] = await Promise.all([
+    const [apptsRes, complsRes, invRes, payRes] = await Promise.all([
       supabase.from('appointments').select('*, doctors(*), medical_records(*)').eq('patient_id', patient.id).order('appointment_date', { ascending: false }),
-      supabase.from('complaints').select('*').eq('patient_id', patient.id).order('created_at', { ascending: false })
+      supabase.from('complaints').select('*').eq('patient_id', patient.id).order('created_at', { ascending: false }),
+      supabase.from('invoices').select('*').eq('patient_id', patient.id).order('issued_at', { ascending: false }),
+      supabase.from('payments').select('*').eq('patient_id', patient.id).order('paid_at', { ascending: false })
     ])
     setAppointments(apptsRes.data || [])
     setComplaints(complsRes.data || [])
+    setInvoices(invRes.data || [])
+    setPayments(payRes.data || [])
     setLoading(false)
   }
 
@@ -458,7 +488,7 @@ function Dashboard({ patient, clinic, onLogout, setPatient }) {
   const past = appointments.filter(a => a.appointment_date < today || a.status === 'cancelled')
 
   if (viewingApt) {
-    return <AppointmentDetailsView apt={viewingApt} onClose={() => setViewingApt(null)} clinic={clinic} />
+    return <AppointmentDetailsView apt={viewingApt} onClose={() => setViewingApt(null)} clinic={clinic} invoices={invoices} payments={payments} />
   }
 
   return (
@@ -510,6 +540,7 @@ function Dashboard({ patient, clinic, onLogout, setPatient }) {
             { id: 'appointments', label: 'مواعيدي', icon: Calendar },
             { id: 'book', label: 'حجز موعد', icon: Plus },
             { id: 'complaints', label: 'شكاوي', icon: AlertCircle },
+            { id: 'invoices', label: 'فواتيري', icon: Receipt },
             { id: 'profile', label: 'بياناتي', icon: User },
           ].map(tab => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)}
@@ -533,6 +564,7 @@ function Dashboard({ patient, clinic, onLogout, setPatient }) {
             {activeTab === 'appointments' && <AppointmentsTab upcoming={upcoming} past={past} onCancel={cancelAppointment} onView={setViewingApt} />}
             {activeTab === 'book' && <BookAppointmentTab patient={patient} clinic={clinic} onSuccess={() => { loadData(); setActiveTab('appointments'); }} />}
             {activeTab === 'complaints' && <ComplaintsTab patient={patient} clinic={clinic} complaints={complaints} onUpdate={loadData} />}
+            {activeTab === 'invoices' && <PatientInvoicesTab invoices={invoices} payments={payments} appointments={appointments} onView={setViewingApt} />}
             {activeTab === 'profile' && <ProfileTab patient={patient} clinic={clinic} setPatient={setPatient} />}
           </>
         )}
@@ -1052,9 +1084,11 @@ function BookAppointmentTab({ patient, clinic, onSuccess }) {
 // ═══════════════════════════════════════════════════════════
 // Appointment Details
 // ═══════════════════════════════════════════════════════════
-function AppointmentDetailsView({ apt, onClose, clinic }) {
+function AppointmentDetailsView({ apt, onClose, clinic, invoices = [], payments = [] }) {
   const record = apt.medical_records?.[0]
   const xrays = record?.xray_images || []
+  const appointmentInvoices = invoices.filter(inv => inv.appointment_id === apt.id)
+  const appointmentPayments = payments.filter(pay => pay.appointment_id === apt.id)
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-sky-50 to-cyan-50 page-enter" dir="rtl">
@@ -1087,6 +1121,41 @@ function AppointmentDetailsView({ apt, onClose, clinic }) {
           </div>
         </div>
 
+        {appointmentInvoices.length > 0 && (
+          <div className="bg-white rounded-3xl p-6 shadow-xl border border-amber-100">
+            <h2 className="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <Receipt className="w-6 h-6 text-amber-600" /> الفواتير والمدفوعات
+            </h2>
+            <div className="space-y-3">
+              {appointmentInvoices.map(inv => (
+                <div key={inv.id} className="border-2 border-amber-100 rounded-2xl overflow-hidden">
+                  <div className="bg-amber-50 p-4 flex items-center justify-between gap-3 flex-wrap">
+                    <div>
+                      <p className="font-black text-slate-800">فاتورة رقم: {inv.invoice_no}</p>
+                      <p className="text-xs text-slate-500">{inv.issued_at?.substring(0, 10)}</p>
+                    </div>
+                    <span className="text-lg font-black text-amber-700">{parseFloat(inv.total || 0).toFixed(0)} ر.س</span>
+                  </div>
+                  {Array.isArray(inv.items) && inv.items.length > 0 && (
+                    <div className="p-4">
+                      {inv.items.map((item, i) => (
+                        <div key={i} className="flex justify-between py-2 border-b border-slate-100 text-sm">
+                          <span>{item.name} × {item.qty || 1}</span>
+                          <strong>{parseFloat(item.price || 0).toFixed(0)} ر.س</strong>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="p-4 bg-slate-50 text-sm space-y-1">
+                    <div className="flex justify-between"><span>المدفوع:</span><strong className="text-emerald-600">{parseFloat(inv.paid_amount || 0).toFixed(0)} ر.س</strong></div>
+                    <div className="flex justify-between"><span>المتبقي:</span><strong>{parseFloat(inv.remaining_amount || 0).toFixed(0)} ر.س</strong></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {record ? (
           <>
             <div className="bg-white rounded-3xl p-6 shadow-xl border border-sky-100">
@@ -1101,16 +1170,16 @@ function AppointmentDetailsView({ apt, onClose, clinic }) {
               </div>
             </div>
 
-            {/* صور الأشعة */}
+            {/* مرفقات الكشف */}
             {xrays.length > 0 && (
               <div className="bg-white rounded-3xl p-6 shadow-xl border border-sky-100">
                 <h2 className="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
-                  <Activity className="w-6 h-6 text-violet-600" /> صور الأشعة ({xrays.length})
+                  <Activity className="w-6 h-6 text-violet-600" /> مرفقات الكشف ({xrays.length})
                 </h2>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   {xrays.map((url, i) => (
                     <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="aspect-square rounded-2xl overflow-hidden border-2 border-sky-100 hover:border-sky-400 transition shadow-md">
-                      <img src={url} alt={`أشعة ${i+1}`} className="w-full h-full object-cover hover:scale-110 transition" />
+                      <img src={url} alt={`مرفق ${i+1}`} className="w-full h-full object-cover hover:scale-110 transition" />
                     </a>
                   ))}
                 </div>
@@ -1177,6 +1246,41 @@ function DetailBox({ icon: Icon, label, value, color }) {
     <div className={`bg-gradient-to-br ${color} border-r-4 rounded-xl p-4`}>
       <p className="text-xs font-bold mb-1 flex items-center gap-1"><Icon className="w-4 h-4" /> {label}</p>
       <p className="text-slate-800 whitespace-pre-wrap">{value}</p>
+    </div>
+  )
+}
+
+
+function PatientInvoicesTab({ invoices, payments, appointments, onView }) {
+  return (
+    <div className="space-y-6">
+      <div className="glass rounded-3xl p-6 shadow-2xl">
+        <h3 className="text-2xl font-bold text-slate-800 mb-4 flex items-center gap-2"><Receipt className="w-6 h-6 text-amber-600" /> فواتيري ومدفوعاتي</h3>
+        {invoices.length === 0 ? <EmptyState icon={Receipt} message="لا توجد فواتير حتى الآن" /> : (
+          <div className="space-y-3">
+            {invoices.map(inv => {
+              const apt = appointments.find(a => a.id === inv.appointment_id)
+              return (
+                <div key={inv.id} className="bg-white/85 rounded-2xl p-5 border border-amber-100">
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div>
+                      <p className="font-black text-slate-800">{inv.invoice_no}</p>
+                      <p className="text-sm text-slate-500">{inv.issued_at?.substring(0,10)} • {apt?.doctors?.name || 'عيادة'}</p>
+                    </div>
+                    <div className="text-left">
+                      <p className="text-xl font-black text-amber-700">{parseFloat(inv.total || 0).toFixed(0)} ر.س</p>
+                      <p className="text-xs text-emerald-600 font-bold">{inv.payment_status === 'paid' ? 'مدفوعة' : inv.payment_status}</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    {apt && <button onClick={() => onView(apt)} className="bg-sky-50 text-sky-700 px-4 py-2 rounded-xl text-sm font-bold">عرض الموعد</button>}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
