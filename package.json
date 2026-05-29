@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Ø­Ù„ÙˆÙ„ - Ù†Ø¸Ø§Ù… Ø¥Ø¯Ø§Ø±Ø© Ø¹ÙŠØ§Ø¯Ø§Øª Ø§Ù„Ø£Ø³Ù†Ø§Ù† Ø§Ù„Ø°ÙƒÙŠ",
+  "description": "حلول - نظام إدارة عيادات الأسنان الذكي",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -29,4 +29,3 @@
     "vite": "^5.0.8"
   }
 }
- 
