@@ -109,6 +109,9 @@ function StaffLogin({ clinic, onSuccess }) {
   const handleLogin = async (e) => {
     e.preventDefault(); setError(''); setLoading(true)
     try {
+      if (userType === 'reception' && clinic.reception_enabled === false) { setError('خدمة الاستقبال غير مفعّلة لهذه العيادة'); setLoading(false); return }
+      if (userType === 'accountant' && clinic.accounting_enabled === false) { setError('خدمة الحسابات غير مفعّلة لهذه العيادة'); setLoading(false); return }
+      if (userType === 'doctor' && clinic.doctor_portal_enabled === false) { setError('صفحة الطبيب غير مفعّلة لهذه العيادة'); setLoading(false); return }
       if (userType === 'doctor') {
         const { data } = await supabase.from('doctors').select('*')
           .eq('clinic_id', clinic.id).eq('username', credentials.username.trim())
@@ -154,11 +157,11 @@ function StaffLogin({ clinic, onSuccess }) {
         <div className="glass-dark rounded-3xl p-8 shadow-2xl animate-slide-up">
           <div className="grid grid-cols-2 gap-2 mb-6 bg-white/5 p-1.5 rounded-2xl">
             {[
-              { id: 'admin', label: 'أدمن', icon: Settings, activeClass: 'gradient-medical' },
-              { id: 'reception', label: 'استقبال', icon: Users, activeClass: 'gradient-warning' },
-              { id: 'accountant', label: 'محاسب', icon: DollarSign, activeClass: 'gradient-purple' },
-              { id: 'doctor', label: 'دكتور', icon: Stethoscope, activeClass: 'gradient-success' },
-            ].map(t => (
+              { id: 'admin', label: 'أدمن', icon: Settings, activeClass: 'gradient-medical', enabled: true },
+              { id: 'reception', label: 'استقبال', icon: Users, activeClass: 'gradient-warning', enabled: clinic.reception_enabled !== false },
+              { id: 'accountant', label: 'محاسب', icon: DollarSign, activeClass: 'gradient-purple', enabled: clinic.accounting_enabled !== false },
+              { id: 'doctor', label: 'دكتور', icon: Stethoscope, activeClass: 'gradient-success', enabled: clinic.doctor_portal_enabled !== false },
+            ].filter(t => t.enabled).map(t => (
               <button key={t.id} type="button" onClick={() => setUserType(t.id)}
                 className={`py-3 rounded-xl font-bold transition ${userType === t.id ? `${t.activeClass} text-white shadow-lg` : 'text-white/70 hover:text-white'}`}>
                 <t.icon className="w-4 h-4 inline mr-1" /> {t.label}
@@ -197,11 +200,6 @@ function StaffLogin({ clinic, onSuccess }) {
             </button>
           </form>
 
-          <div className="text-center mt-6">
-            <Link to="/" className="text-white/60 hover:text-white text-sm inline-flex items-center gap-1">
-              <Home className="w-4 h-4" /> الرئيسية
-            </Link>
-          </div>
         </div>
       </div>
     </div>
@@ -1210,10 +1208,21 @@ function DoctorDashboard({ user, clinic, onLogout }) {
   const [examiningApt, setExaminingApt] = useState(null)
   const [doctorTab, setDoctorTab] = useState('patients')
   const [notification, setNotification] = useState(null)
+  const work = useWorkSession({ clinic, userType: 'doctor', userId: user.id, userName: user.name, role: 'doctor' })
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { if (work.active) load() }, [work.active])
 
   // 🔴 Realtime
+  useRealtime('payment_requests', (payload) => {
+    if (payload.new?.doctor_id === user.id || payload.old?.doctor_id === user.id) {
+      load()
+      if (payload.eventType === 'UPDATE' && payload.new?.status === 'paid') {
+        setNotification('✅ تم دفع خدمة إضافية')
+        setTimeout(() => setNotification(null), 5000)
+      }
+    }
+  })
+
   useRealtime('appointments', (payload) => {
     if (payload.new?.doctor_id === user.id || payload.old?.doctor_id === user.id) {
       load()
@@ -1244,6 +1253,10 @@ function DoctorDashboard({ user, clinic, onLogout }) {
   const firstVisits = appointments.filter(a => a.type === 'first_visit')
   const emergencies = appointments.filter(a => a.type === 'emergency')
   const followUps = appointments.filter(a => a.type === 'follow_up')
+
+  if (!work.active) {
+    return <DutyGate clinic={clinic} userName={user.name} roleLabel="الطبيب" icon={Stethoscope} work={work} onLogout={onLogout} />
+  }
 
   if (examiningApt) {
     return <ExaminationView apt={examiningApt} clinic={clinic} services={services} doctor={user} onClose={() => { setExaminingApt(null); load() }} />
@@ -1295,6 +1308,10 @@ function DoctorDashboard({ user, clinic, onLogout }) {
           </div>
         </div>
       </header>
+
+      <div className="max-w-7xl mx-auto px-4 pt-4">
+        <WorkStatusBar work={work} />
+      </div>
 
       {doctorTab === 'schedule' ? (
         <div className="max-w-7xl mx-auto p-4 sm:p-6">
@@ -1363,7 +1380,7 @@ function DoctorDashboard({ user, clinic, onLogout }) {
                       </div>
                     </div>
                     <div className="mt-3 pt-3 border-t border-slate-200">
-                      <button onClick={() => setExaminingApt(apt)}
+                      <button onClick={async () => { await supabase.from('appointments').update({ doctor_started_at: apt.doctor_started_at || new Date().toISOString() }).eq('id', apt.id); setExaminingApt(apt) }}
                         className="gradient-success text-white px-4 py-2 rounded-xl font-bold text-sm shadow-lg btn-medical flex items-center gap-2">
                         <Stethoscope className="w-4 h-4" /> {apt.medical_records?.length > 0 ? 'تعديل الكشف' : 'بدء الكشف'}
                       </button>
@@ -1380,7 +1397,7 @@ function DoctorDashboard({ user, clinic, onLogout }) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// Examination View - مع رفع صور الأشعة
+// Examination View - مرفقات الكشف
 // ═══════════════════════════════════════════════════════════
 function ExaminationView({ apt, clinic, services, doctor, onClose }) {
   const existingRecord = apt.medical_records?.[0]
@@ -1398,6 +1415,23 @@ function ExaminationView({ apt, clinic, services, doctor, onClose }) {
   })
   const [loading, setLoading] = useState(false)
   const [uploadingXray, setUploadingXray] = useState(false)
+  const [paymentRequests, setPaymentRequests] = useState([])
+  const [historyRecords, setHistoryRecords] = useState([])
+
+  useEffect(() => { loadDoctorExamData() }, [apt.id])
+
+  useRealtime('payment_requests', (payload) => {
+    if (payload.new?.appointment_id === apt.id || payload.old?.appointment_id === apt.id) loadDoctorExamData()
+  }, { column: 'appointment_id', value: apt.id })
+
+  const loadDoctorExamData = async () => {
+    const [req, hist] = await Promise.all([
+      supabase.from('payment_requests').select('*').eq('appointment_id', apt.id).order('requested_at', { ascending: false }),
+      supabase.from('medical_records').select('*, doctors(name)').eq('patient_id', apt.patient_id).neq('appointment_id', apt.id).order('created_at', { ascending: false }).limit(5)
+    ])
+    setPaymentRequests(req.data || [])
+    setHistoryRecords(hist.data || [])
+  }
 
   const total = form.services_provided.reduce((sum, s) => sum + (s.price * s.qty), 0)
   const finalTotal = total - parseFloat(form.discount || 0)
@@ -1411,6 +1445,27 @@ function ExaminationView({ apt, clinic, services, doctor, onClose }) {
 
   const removeService = (id) => setForm({...form, services_provided: form.services_provided.filter(s => s.id !== id)})
   const updateQty = (id, qty) => { if (qty < 1) return removeService(id); setForm({...form, services_provided: form.services_provided.map(s => s.id === id ? {...s, qty} : s)}) }
+
+  const requestExtraPayment = async (service) => {
+    const existsPending = paymentRequests.find(r => r.service_id === service.id && r.status === 'pending')
+    if (existsPending) return alert('هذه الخدمة مطلوبة من الاستقبال بالفعل')
+    const amount = parseFloat(service.price) || 0
+    const { error } = await supabase.from('payment_requests').insert([{
+      clinic_id: clinic.id,
+      appointment_id: apt.id,
+      patient_id: apt.patient_id,
+      doctor_id: doctor.id,
+      service_id: service.id,
+      service_name: service.name,
+      amount,
+      status: 'pending',
+      requested_by: doctor.id,
+      notes: 'طلب خدمة إضافية من الطبيب'
+    }])
+    if (error) return alert('❌ ' + error.message)
+    alert('✓ تم إرسال طلب الدفع للاستقبال')
+    loadDoctorExamData()
+  }
 
   const handleXrayUpload = async (e) => {
     const files = Array.from(e.target.files)
@@ -1431,6 +1486,10 @@ function ExaminationView({ apt, clinic, services, doctor, onClose }) {
   }
 
   const save = async (complete = false) => {
+    if (complete && paymentRequests.some(r => r.status === 'pending')) {
+      alert('لا يمكن إنهاء الكشف قبل دفع كل طلبات الخدمات الإضافية عند الاستقبال')
+      return
+    }
     setLoading(true)
     const recordData = {
       clinic_id: clinic.id, appointment_id: apt.id, patient_id: apt.patient_id, doctor_id: doctor.id,
@@ -1445,7 +1504,7 @@ function ExaminationView({ apt, clinic, services, doctor, onClose }) {
     if (existingRecord) await supabase.from('medical_records').update(recordData).eq('id', existingRecord.id)
     else await supabase.from('medical_records').insert([recordData])
 
-    if (complete) await supabase.from('appointments').update({ status: 'completed' }).eq('id', apt.id)
+    if (complete) await supabase.from('appointments').update({ status: 'completed', doctor_completed_at: new Date().toISOString() }).eq('id', apt.id)
 
     setLoading(false)
     onClose()
@@ -1485,6 +1544,28 @@ function ExaminationView({ apt, clinic, services, doctor, onClose }) {
           </div>
         </div>
 
+        {/* تاريخ المريض الطبي */}
+        <div className="bg-white rounded-3xl p-6 shadow-xl border border-sky-100">
+          <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><FileText className="w-5 h-5 text-sky-600" /> تاريخ المريض الطبي</h3>
+          {historyRecords.length === 0 ? (
+            <div className="text-center py-6 text-slate-500 bg-slate-50 rounded-2xl">لا توجد كشوفات سابقة لهذا المريض</div>
+          ) : (
+            <div className="space-y-3">
+              {historyRecords.map(r => (
+                <div key={r.id} className="border border-sky-100 rounded-2xl p-4 bg-sky-50/40">
+                  <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+                    <p className="font-black text-slate-800">{r.created_at?.substring(0,10)} • {r.doctors?.name || 'طبيب'}</p>
+                    <span className="text-xs bg-white text-sky-700 px-2 py-1 rounded-full font-bold">كشف سابق</span>
+                  </div>
+                  {r.diagnosis && <p className="text-sm text-slate-700"><strong>التشخيص:</strong> {r.diagnosis}</p>}
+                  {r.treatment && <p className="text-sm text-slate-700"><strong>العلاج:</strong> {r.treatment}</p>}
+                  {r.prescription && <p className="text-sm text-slate-700"><strong>الوصفة:</strong> {r.prescription}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* التشخيص */}
         <div className="bg-white rounded-3xl p-6 shadow-xl border border-emerald-100">
           <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><FileText className="w-5 h-5 text-sky-600" /> التشخيص والعلاج</h3>
@@ -1517,22 +1598,22 @@ function ExaminationView({ apt, clinic, services, doctor, onClose }) {
           </div>
         </div>
 
-        {/* صور الأشعة */}
+        {/* مرفقات الكشف */}
         <div className="bg-white rounded-3xl p-6 shadow-xl border border-violet-100">
-          <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><ImageIcon className="w-5 h-5 text-violet-600" /> صور الأشعة</h3>
+          <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><ImageIcon className="w-5 h-5 text-violet-600" /> مرفقات الكشف</h3>
 
           <label className={`upload-zone block rounded-2xl p-6 text-center cursor-pointer ${uploadingXray ? 'opacity-50' : ''}`}>
             <input type="file" multiple accept="image/*" onChange={handleXrayUpload} disabled={uploadingXray} className="hidden" />
             <ImageIcon className="w-10 h-10 mx-auto text-violet-500 mb-2" />
-            <p className="font-bold text-violet-700">{uploadingXray ? '⏳ جاري الرفع...' : '📸 رفع صور الأشعة'}</p>
-            <p className="text-xs text-slate-500 mt-1">يمكنك اختيار أكثر من صورة</p>
+            <p className="font-bold text-violet-700">{uploadingXray ? '⏳ جاري الرفع...' : '📸 رفع مرفقات الكشف'}</p>
+            <p className="text-xs text-slate-500 mt-1">يمكنك اختيار مرفق أو تحليل أو تقرير أو أي صورة مرتبطة بالكشف</p>
           </label>
 
           {form.xray_images.length > 0 && (
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 mt-4">
               {form.xray_images.map((url, i) => (
                 <div key={i} className="relative group aspect-square rounded-2xl overflow-hidden border-2 border-violet-200">
-                  <img src={url} alt={`أشعة ${i+1}`} className="w-full h-full object-cover" />
+                  <img src={url} alt={`مرفق ${i+1}`} className="w-full h-full object-cover" />
                   <button onClick={() => removeXray(url)} className="absolute top-1 right-1 w-7 h-7 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition shadow-lg">
                     <X className="w-4 h-4" />
                   </button>
@@ -1561,9 +1642,12 @@ function ExaminationView({ apt, clinic, services, doctor, onClose }) {
               <p className="text-sm font-bold text-slate-700 mb-2">➕ إضافة خدمات:</p>
               <div className="flex flex-wrap gap-2">
                 {services.map(s => (
-                  <button key={s.id} onClick={() => addService(s)} className="bg-amber-50 hover:bg-amber-100 border-2 border-amber-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-700">
-                    {s.name} <span className="text-amber-700">({s.price} ر.س)</span>
-                  </button>
+                  <div key={s.id} className="flex items-center gap-1 bg-amber-50 border-2 border-amber-200 rounded-xl p-1">
+                    <button onClick={() => addService(s)} className="px-3 py-2 text-sm font-bold text-slate-700">
+                      {s.name} <span className="text-amber-700">({s.price} ر.س)</span>
+                    </button>
+                    <button onClick={() => requestExtraPayment(s)} className="gradient-warning text-white px-3 py-2 rounded-lg text-xs font-bold">طلب دفع</button>
+                  </div>
                 ))}
               </div>
             </div>
@@ -1604,6 +1688,25 @@ function ExaminationView({ apt, clinic, services, doctor, onClose }) {
           <div className="mt-4 bg-blue-50 border border-blue-100 rounded-2xl p-4 text-sm text-blue-800 font-bold">
             ملاحظة: لا يتم تسجيل أي مدفوعات من شاشة الدكتور. الاستقبال هو المسؤول عن التحصيل وإصدار الفاتورة.
           </div>
+
+          {paymentRequests.length > 0 && (
+            <div className="mt-4 border-t border-slate-100 pt-4">
+              <h4 className="font-black text-slate-800 mb-3">طلبات الدفع الإضافية</h4>
+              <div className="space-y-2">
+                {paymentRequests.map(r => (
+                  <div key={r.id} className={`rounded-xl p-3 flex items-center justify-between gap-3 ${r.status === 'paid' ? 'bg-emerald-50 border border-emerald-100' : 'bg-amber-50 border border-amber-100'}`}>
+                    <div>
+                      <p className="font-bold text-slate-800">{r.service_name}</p>
+                      <p className="text-xs text-slate-500">{parseFloat(r.amount || 0).toFixed(0)} ر.س</p>
+                    </div>
+                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${r.status === 'paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                      {r.status === 'paid' ? 'تم الدفع' : 'في انتظار الدفع'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-3 sticky bottom-4">
@@ -1624,19 +1727,23 @@ function ExaminationView({ apt, clinic, services, doctor, onClose }) {
 // ═══════════════════════════════════════════════════════════
 function ReceptionDashboard({ user, clinic, onLogout }) {
   const [tab, setTab] = useState('dashboard')
+  const [bookingFilter, setBookingFilter] = useState('pending')
   const [appointments, setAppointments] = useState([])
   const [complaints, setComplaints] = useState([])
   const [emergencies, setEmergencies] = useState([])
   const [payments, setPayments] = useState([])
   const [services, setServices] = useState([])
   const [insuranceCompanies, setInsuranceCompanies] = useState([])
-  const [attendance, setAttendance] = useState(null)
+  const [paymentRequests, setPaymentRequests] = useState([])
+  const [activeSessions, setActiveSessions] = useState([])
   const [selectedPaymentApt, setSelectedPaymentApt] = useState(null)
+  const [selectedPaymentRequest, setSelectedPaymentRequest] = useState(null)
   const [paymentForm, setPaymentForm] = useState({ service_id: '', amount: '', payment_method: 'cash', insurance_company_id: '', reference_no: '', notes: '' })
   const [loading, setLoading] = useState(true)
   const [notification, setNotification] = useState(null)
+  const work = useWorkSession({ clinic, userType: 'admin_user', userId: user.id, userName: user.full_name || user.username, role: 'receptionist' })
 
-  useEffect(() => { loadReceptionData() }, [])
+  useEffect(() => { if (work.active) loadReceptionData() }, [work.active])
 
   useRealtime('appointments', (payload) => {
     if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) {
@@ -1648,52 +1755,41 @@ function ReceptionDashboard({ user, clinic, onLogout }) {
     }
   }, { column: 'clinic_id', value: clinic.id })
 
-  useRealtime('emergency_requests', (payload) => {
+  useRealtime('payment_requests', (payload) => {
     if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) {
       loadReceptionData()
       if (payload.eventType === 'INSERT') {
-        setNotification('🚨 طلب طوارئ جديد')
+        setNotification('💳 طلب دفع جديد من الطبيب')
         setTimeout(() => setNotification(null), 5000)
       }
     }
   }, { column: 'clinic_id', value: clinic.id })
 
+  useRealtime('work_sessions', (payload) => {
+    if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) loadReceptionData()
+  }, { column: 'clinic_id', value: clinic.id })
+
   const loadReceptionData = async () => {
     const today = new Date().toISOString().split('T')[0]
-    const [a, c, e, p, att, srv, ins] = await Promise.all([
+    const [a, c, e, p, srv, ins, req, sessions] = await Promise.all([
       supabase.from('appointments').select('*, patients(*), doctors(*)').eq('clinic_id', clinic.id).gte('appointment_date', today).order('appointment_date').order('appointment_time'),
       supabase.from('complaints').select('*, patients(*)').eq('clinic_id', clinic.id).neq('status', 'resolved').order('created_at', { ascending: false }),
       supabase.from('emergency_requests').select('*, patients(*)').eq('clinic_id', clinic.id).neq('status', 'closed').order('created_at', { ascending: false }),
-      supabase.from('payments').select('*').eq('clinic_id', clinic.id).gte('paid_at', `${today}T00:00:00`).order('paid_at', { ascending: false }),
-      supabase.from('staff_attendance').select('*').eq('clinic_id', clinic.id).eq('staff_id', user.id).is('clock_out', null).order('clock_in', { ascending: false }).limit(1),
+      supabase.from('payments').select('*, patients(name, phone), appointments(doctor_id, doctors(name)), admin_users(full_name)').eq('clinic_id', clinic.id).order('paid_at', { ascending: false }).limit(80),
       supabase.from('clinic_services').select('*').eq('clinic_id', clinic.id).eq('is_active', true).order('name'),
       supabase.from('insurance_companies').select('*').eq('is_active', true).order('name'),
+      supabase.from('payment_requests').select('*, patients(name, phone, national_id), doctors(name)').eq('clinic_id', clinic.id).order('requested_at', { ascending: false }),
+      supabase.from('work_sessions').select('*').eq('clinic_id', clinic.id).is('clock_out', null).order('clock_in', { ascending: false }),
     ])
     setAppointments(a.data || [])
     setComplaints(c.data || [])
     setEmergencies(e.data || [])
     setPayments(p.data || [])
-    setAttendance(att.data?.[0] || null)
     setServices(srv.data || [])
     setInsuranceCompanies(ins.data || [])
+    setPaymentRequests(req.data || [])
+    setActiveSessions(sessions.data || [])
     setLoading(false)
-  }
-
-  const clockIn = async () => {
-    const { data, error } = await supabase.from('staff_attendance').insert([{ clinic_id: clinic.id, staff_id: user.id }]).select().single()
-    if (error) return alert('❌ ' + error.message)
-    setAttendance(data)
-  }
-
-  const clockOut = async () => {
-    if (!attendance) return
-    const now = new Date()
-    const start = new Date(attendance.clock_in)
-    const total_minutes = Math.max(0, Math.round((now - start) / 60000))
-    const { error } = await supabase.from('staff_attendance').update({ clock_out: now.toISOString(), total_minutes }).eq('id', attendance.id)
-    if (error) return alert('❌ ' + error.message)
-    setAttendance(null)
-    loadReceptionData()
   }
 
   const confirmAppointment = async (apt) => {
@@ -1702,18 +1798,16 @@ function ReceptionDashboard({ user, clinic, onLogout }) {
 
   const openPayment = (apt) => {
     const firstService = services[0]
-    const patientInsuranceName = apt.patients?.insurance_company
-    const defaultInsurance = insuranceCompanies.find(x => x.name === patientInsuranceName)
     const amount = firstService?.price || 0
+    setSelectedPaymentRequest(null)
     setSelectedPaymentApt(apt)
-    setPaymentForm({
-      service_id: firstService?.id || '',
-      amount: amount ? String(amount) : '',
-      payment_method: patientInsuranceName ? 'insurance' : 'cash',
-      insurance_company_id: defaultInsurance?.id || '',
-      reference_no: '',
-      notes: '',
-    })
+    setPaymentForm({ service_id: firstService?.id || '', amount: amount ? String(amount) : '', payment_method: apt.patients?.insurance_company ? 'insurance' : 'cash', insurance_company_id: '', reference_no: '', notes: '' })
+  }
+
+  const openRequestPayment = (req) => {
+    setSelectedPaymentApt(null)
+    setSelectedPaymentRequest(req)
+    setPaymentForm({ service_id: req.service_id || '', amount: String(req.amount || 0), payment_method: 'cash', insurance_company_id: '', reference_no: '', notes: '' })
   }
 
   const updatePaymentService = (serviceId) => {
@@ -1724,22 +1818,23 @@ function ReceptionDashboard({ user, clinic, onLogout }) {
 
   const submitPayment = async (e) => {
     e.preventDefault()
-    if (!selectedPaymentApt) return
+    const target = selectedPaymentApt || selectedPaymentRequest
+    if (!target) return
     const amount = parseFloat(paymentForm.amount) || 0
-    if (amount <= 0) return alert('اكتب مبلغ صحيح')
+    if (amount <= 0) return alert('المبلغ غير صحيح')
 
     const srv = services.find(s => s.id === paymentForm.service_id)
     const now = new Date().toISOString()
+    const patientId = selectedPaymentApt?.patient_id || selectedPaymentRequest?.patient_id
+    const appointmentId = selectedPaymentApt?.id || selectedPaymentRequest?.appointment_id
 
     const { data: invoice, error: invoiceError } = await supabase.from('invoices').insert([{
       clinic_id: clinic.id,
-      patient_id: selectedPaymentApt.patient_id,
-      appointment_id: selectedPaymentApt.id,
+      patient_id: patientId,
+      appointment_id: appointmentId,
       invoice_no: `INV-${Date.now()}`,
-      items: srv ? [{ id: srv.id, name: srv.name, qty: 1, price: amount }] : [],
+      items: [{ id: srv?.id || selectedPaymentRequest?.service_id, name: srv?.name || selectedPaymentRequest?.service_name || 'خدمة', qty: 1, price: amount }],
       subtotal: amount,
-      discount: 0,
-      insurance_discount: 0,
       total: amount,
       paid_amount: amount,
       remaining_amount: 0,
@@ -1747,53 +1842,67 @@ function ReceptionDashboard({ user, clinic, onLogout }) {
       issued_by: user.id,
       issued_at: now,
     }]).select().single()
-
     if (invoiceError) return alert('❌ ' + invoiceError.message)
 
     const { error } = await supabase.from('payments').insert([{
       clinic_id: clinic.id,
-      patient_id: selectedPaymentApt.patient_id,
-      appointment_id: selectedPaymentApt.id,
+      patient_id: patientId,
+      appointment_id: appointmentId,
       invoice_id: invoice?.id,
       amount,
       payment_method: paymentForm.payment_method,
       reference_no: paymentForm.reference_no || null,
       received_by: user.id,
-      notes: paymentForm.notes || `تحصيل استقبال - ${srv?.name || 'خدمة'}`,
+      notes: paymentForm.notes || (selectedPaymentRequest ? `دفع طلب خدمة: ${selectedPaymentRequest.service_name}` : `دفع كشف: ${srv?.name || 'خدمة'}`),
     }])
     if (error) return alert('❌ ' + error.message)
 
-    await supabase.from('appointments').update({
-      service_id: paymentForm.service_id || null,
-      paid_by: user.id,
-      paid_at: now,
-      checked_in_by: user.id,
-      checked_in_at: now,
-      status: selectedPaymentApt.status === 'pending' ? 'confirmed' : selectedPaymentApt.status,
-    }).eq('id', selectedPaymentApt.id)
+    if (selectedPaymentRequest) {
+      await supabase.from('payment_requests').update({ status: 'paid', paid_by: user.id, paid_at: now }).eq('id', selectedPaymentRequest.id)
+    } else {
+      await supabase.from('appointments').update({ service_id: paymentForm.service_id || null, paid_by: user.id, paid_at: now, checked_in_by: user.id, checked_in_at: now, status: selectedPaymentApt.status === 'pending' ? 'confirmed' : selectedPaymentApt.status }).eq('id', selectedPaymentApt.id)
+    }
 
     setSelectedPaymentApt(null)
-    alert('✓ تم تسجيل الدفع وتحويل المريض للدكتور')
+    setSelectedPaymentRequest(null)
+    alert('✓ تم تسجيل الدفع بنجاح')
     loadReceptionData()
+  }
+
+  if (!work.active) {
+    return <DutyGate clinic={clinic} userName={user.full_name || user.username} roleLabel="موظف الاستقبال" icon={Users} work={work} onLogout={onLogout} />
   }
 
   const today = new Date().toISOString().split('T')[0]
   const todayAppointments = appointments.filter(a => a.appointment_date === today)
+  const filteredAppointments = appointments.filter(a => {
+    if (bookingFilter === 'pending') return a.status === 'pending'
+    if (bookingFilter === 'unpaid') return a.status === 'confirmed' && !a.paid_at
+    if (bookingFilter === 'ready') return !!a.paid_at && !a.doctor_started_at && a.status !== 'completed'
+    if (bookingFilter === 'in_exam') return !!a.doctor_started_at && a.status !== 'completed'
+    if (bookingFilter === 'completed') return a.status === 'completed'
+    return true
+  })
   const pendingAppointments = appointments.filter(a => a.status === 'pending')
-  const readyForDoctor = appointments.filter(a => a.paid_at)
-  const todayRevenue = payments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0)
+  const pendingRequests = paymentRequests.filter(r => r.status === 'pending')
+  const todayRevenue = payments.filter(p => p.paid_at?.substring(0,10) === today).reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0)
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-sky-50 to-cyan-50 page-enter" dir="rtl">
       {notification && <Toast msg={notification} gradient="gradient-warning" />}
       <StaffHeader title="شاشة الاستقبال" subtitle={`${user.full_name || user.username} • ${clinic.name}`} icon={Users} gradient="gradient-medical-dark" onLogout={onLogout} />
 
-      <div className="max-w-7xl mx-auto px-4 pt-4">
+      <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-5">
+        <WorkStatusBar work={work} />
+        <ReceptionQuickSearch clinic={clinic} services={services} doctorsActive={activeSessions.filter(s => s.role === 'doctor')} onRefresh={loadReceptionData} />
+
         <div className="flex gap-2 overflow-x-auto pb-2">
           {[
             { id: 'dashboard', label: 'الرئيسية', icon: BarChart3 },
-            { id: 'appointments', label: 'المواعيد', icon: Calendar },
-            { id: 'payments', label: 'المدفوعات', icon: Receipt },
+            { id: 'bookings', label: 'الحجوزات', icon: Calendar },
+            { id: 'requests', label: 'طلبات الدفع', icon: Receipt },
+            { id: 'payments', label: 'المدفوعات', icon: DollarSign },
+            { id: 'team', label: 'الأطباء النشطين', icon: Stethoscope },
             { id: 'insurance', label: 'التأمين', icon: ShieldCheck },
             { id: 'emergency', label: 'الطوارئ', icon: AlertCircle },
             { id: 'complaints', label: 'الشكاوى', icon: FileText },
@@ -1803,37 +1912,30 @@ function ReceptionDashboard({ user, clinic, onLogout }) {
             </button>
           ))}
         </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-6">
-        <div className="bg-white rounded-3xl p-5 shadow-xl border border-sky-100 flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <p className="text-sm text-slate-500">حالة الدوام</p>
-            <p className={`text-xl font-black ${attendance ? 'text-emerald-600' : 'text-slate-700'}`}>{attendance ? 'مسجل دخول' : 'لم تسجل دخول اليوم'}</p>
-          </div>
-          {attendance ? (
-            <button onClick={clockOut} className="gradient-danger text-white px-5 py-3 rounded-2xl font-bold shadow-lg">تسجيل خروج</button>
-          ) : (
-            <button onClick={clockIn} className="gradient-success text-white px-5 py-3 rounded-2xl font-bold shadow-lg">تسجيل دخول</button>
-          )}
-        </div>
 
         {loading ? <div className="text-center py-12"><div className="spinner-medical w-14 h-14 mx-auto"></div></div> : (
           <>
             {tab === 'dashboard' && (
               <div className="space-y-6">
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                  <BigStat icon={Calendar} label="مواعيد اليوم" value={todayAppointments.length} gradient="gradient-medical" onClick={() => setTab('appointments')} />
-                  <BigStat icon={Clock} label="بانتظار التأكيد" value={pendingAppointments.length} gradient="gradient-warning" onClick={() => setTab('appointments')} />
-                  <BigStat icon={CheckCircle} label="جاهز للدكتور" value={readyForDoctor.length} gradient="gradient-success" onClick={() => setTab('appointments')} />
-                  <BigStat icon={AlertCircle} label="طلبات طوارئ" value={emergencies.length} gradient="gradient-danger" onClick={() => setTab('emergency')} />
+                  <BigStat icon={Calendar} label="مواعيد اليوم" value={todayAppointments.length} gradient="gradient-medical" onClick={() => setTab('bookings')} />
+                  <BigStat icon={Clock} label="بانتظار التأكيد" value={pendingAppointments.length} gradient="gradient-warning" onClick={() => { setTab('bookings'); setBookingFilter('pending') }} />
+                  <BigStat icon={Receipt} label="طلبات دفع" value={pendingRequests.length} gradient="gradient-danger" onClick={() => setTab('requests')} />
+                  <BigStat icon={Stethoscope} label="أطباء نشطين" value={activeSessions.filter(s => s.role === 'doctor').length} gradient="gradient-success" onClick={() => setTab('team')} />
                   <BigStat icon={DollarSign} label="تحصيل اليوم" value={todayRevenue.toFixed(0)} suffix="ر.س" gradient="gradient-success" onClick={() => setTab('payments')} />
                 </div>
                 <ReceptionAppointments appointments={todayAppointments} onConfirm={confirmAppointment} onPaid={openPayment} title="مواعيد اليوم" />
               </div>
             )}
-            {tab === 'appointments' && <ReceptionAppointments appointments={appointments} onConfirm={confirmAppointment} onPaid={openPayment} title="كل المواعيد القادمة" />}
+            {tab === 'bookings' && (
+              <div className="space-y-4">
+                <BookingFilters active={bookingFilter} setActive={setBookingFilter} />
+                <ReceptionAppointments appointments={filteredAppointments} onConfirm={confirmAppointment} onPaid={openPayment} title="الحجوزات" />
+              </div>
+            )}
+            {tab === 'requests' && <PaymentRequestsTab requests={paymentRequests} onPay={openRequestPayment} />}
             {tab === 'payments' && <ReceptionPayments payments={payments} total={todayRevenue} />}
+            {tab === 'team' && <ActiveTeamPanel sessions={activeSessions} />}
             {tab === 'insurance' && <ReceptionInsurance companies={insuranceCompanies} patients={appointments.map(a => a.patients).filter(Boolean)} />}
             {tab === 'emergency' && <EmergencyTab clinic={clinic} user={user} emergencies={emergencies} onUpdate={loadReceptionData} />}
             {tab === 'complaints' && <ComplaintsManageTab complaints={complaints} />}
@@ -1841,95 +1943,139 @@ function ReceptionDashboard({ user, clinic, onLogout }) {
         )}
       </div>
 
-      {selectedPaymentApt && (
+      {(selectedPaymentApt || selectedPaymentRequest) && (
         <PaymentModal
           apt={selectedPaymentApt}
+          request={selectedPaymentRequest}
           services={services}
           insuranceCompanies={insuranceCompanies}
           form={paymentForm}
           setForm={setPaymentForm}
           onServiceChange={updatePaymentService}
           onSubmit={submitPayment}
-          onClose={() => setSelectedPaymentApt(null)}
+          onClose={() => { setSelectedPaymentApt(null); setSelectedPaymentRequest(null) }}
         />
       )}
     </div>
   )
 }
 
-function PaymentModal({ apt, services, insuranceCompanies, form, setForm, onServiceChange, onSubmit, onClose }) {
-  const selectedService = services.find(s => s.id === form.service_id)
-  const patientInsurance = apt.patients?.insurance_company
 
+
+function BookingFilters({ active, setActive }) {
+  const filters = [
+    { id: 'pending', label: 'بانتظار التأكيد' },
+    { id: 'unpaid', label: 'مؤكد ولم يدفع' },
+    { id: 'ready', label: 'جاهز للدكتور' },
+    { id: 'in_exam', label: 'تحت الكشف' },
+    { id: 'completed', label: 'مكتمل' },
+    { id: 'all', label: 'الكل' },
+  ]
+  return <div className="bg-white rounded-2xl p-3 shadow-soft border border-slate-100 flex gap-2 overflow-x-auto">{filters.map(f => <button key={f.id} onClick={() => setActive(f.id)} className={`px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap ${active === f.id ? 'gradient-medical text-white' : 'bg-slate-50 text-slate-700'}`}>{f.label}</button>)}</div>
+}
+
+function PaymentRequestsTab({ requests, onPay }) {
+  const pending = requests.filter(r => r.status === 'pending')
+  const paid = requests.filter(r => r.status === 'paid')
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-3xl p-6 shadow-xl border border-amber-100">
+        <h3 className="text-xl font-black text-slate-800 mb-4 flex items-center gap-2"><Receipt className="w-6 h-6 text-amber-600" /> طلبات دفع معلقة</h3>
+        {pending.length === 0 ? <EmptyAdminState icon={CheckCircle} message="لا توجد طلبات دفع معلقة" /> : pending.map(r => (
+          <div key={r.id} className="border-2 border-amber-100 rounded-2xl p-4 mb-3 bg-amber-50/40">
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div>
+                <p className="font-black text-slate-800">{r.patients?.name || 'مريض'} • {r.service_name}</p>
+                <p className="text-sm text-slate-600">الجوال: {r.patients?.phone || '-'} • الطبيب: {r.doctors?.name || '-'}</p>
+                <p className="text-lg font-black text-amber-700 mt-1">{parseFloat(r.amount || 0).toFixed(0)} ر.س</p>
+              </div>
+              <button onClick={() => onPay(r)} className="gradient-success text-white px-5 py-3 rounded-xl font-bold shadow-lg">تسجيل الدفع</button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="bg-white rounded-3xl p-6 shadow-xl border border-emerald-100">
+        <h3 className="text-xl font-black text-slate-800 mb-4">طلبات مدفوعة حديثاً</h3>
+        {paid.slice(0,10).length === 0 ? <EmptyAdminState icon={Receipt} message="لا توجد طلبات مدفوعة" /> : paid.slice(0,10).map(r => <div key={r.id} className="bg-emerald-50 rounded-xl p-3 mb-2 flex justify-between"><span className="font-bold">{r.patients?.name} • {r.service_name}</span><span className="text-emerald-700 font-black">مدفوع</span></div>)}
+      </div>
+    </div>
+  )
+}
+
+function ActiveTeamPanel({ sessions }) {
+  const doctors = sessions.filter(s => s.role === 'doctor')
+  const reception = sessions.filter(s => s.role === 'receptionist')
+  return (
+    <div className="grid md:grid-cols-2 gap-6">
+      <TeamActiveCard title="الأطباء النشطين" icon={Stethoscope} items={doctors} />
+      <TeamActiveCard title="الاستقبال النشط" icon={Users} items={reception} />
+    </div>
+  )
+}
+
+function TeamActiveCard({ title, icon: Icon, items }) {
+  return (
+    <div className="bg-white rounded-3xl p-6 shadow-xl border border-sky-100">
+      <h3 className="text-xl font-black text-slate-800 mb-4 flex items-center gap-2"><Icon className="w-6 h-6 text-sky-600" /> {title}</h3>
+      {items.length === 0 ? <EmptyAdminState icon={Icon} message="لا يوجد نشط الآن" /> : items.map(s => <div key={s.id} className="bg-emerald-50 rounded-xl p-3 mb-2 flex justify-between items-center"><div><p className="font-bold text-slate-800">{s.user_name}</p><p className="text-xs text-slate-500">بدأ: {new Date(s.clock_in).toLocaleTimeString('ar-SA')}</p></div><span className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-xs font-bold">نشط</span></div>)}
+    </div>
+  )
+}
+
+function ReceptionQuickSearch({ clinic, services, doctorsActive, onRefresh }) {
+  const [q, setQ] = useState('')
+  const [results, setResults] = useState([])
+  const [selected, setSelected] = useState(null)
+  const [showAdd, setShowAdd] = useState(false)
+  const [newPatient, setNewPatient] = useState({ name: '', phone: '', national_id: '', gender: 'male', insurance_company: '', insurance_policy_no: '' })
+
+  useEffect(() => {
+    const run = async () => {
+      const term = q.trim()
+      if (term.length < 2) { setResults([]); return }
+      const { data } = await supabase.from('patients').select('*').eq('clinic_id', clinic.id).or(`phone.ilike.%${term}%,national_id.ilike.%${term}%,name.ilike.%${term}%`).limit(8)
+      setResults(data || [])
+    }
+    const t = setTimeout(run, 250)
+    return () => clearTimeout(t)
+  }, [q, clinic.id])
+
+  const addPatient = async (e) => {
+    e.preventDefault()
+    const { data, error } = await supabase.from('patients').insert([{ ...newPatient, clinic_id: clinic.id, password: '1111' }]).select().single()
+    if (error) return alert('❌ ' + error.message)
+    setSelected(data); setShowAdd(false); setQ(data.phone); onRefresh?.()
+  }
+
+  return (
+    <div className="bg-white rounded-3xl p-5 shadow-xl border border-sky-100">
+      <div className="flex items-center gap-2 mb-3"><Search className="w-5 h-5 text-sky-600" /><h3 className="font-black text-slate-800">بحث سريع عن مريض</h3></div>
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="اكتب رقم الجوال أو الإقامة أو الاسم" className="w-full px-4 py-3 border-2 border-slate-200 rounded-2xl input-medical outline-none" />
+      {results.length > 0 && <div className="grid md:grid-cols-2 gap-2 mt-3">{results.map(p => <button key={p.id} onClick={() => setSelected(p)} className="text-right bg-slate-50 hover:bg-sky-50 rounded-xl p-3 border border-slate-100"><p className="font-bold text-slate-800">{p.name}</p><p className="text-xs text-slate-500">{p.phone} • {p.national_id || 'بدون إقامة'}</p></button>)}</div>}
+      {q.trim().length >= 2 && results.length === 0 && <button onClick={() => setShowAdd(true)} className="mt-3 gradient-success text-white px-4 py-2 rounded-xl font-bold">إضافة مريض جديد</button>}
+      {showAdd && <form onSubmit={addPatient} className="grid md:grid-cols-2 gap-3 mt-4 bg-slate-50 rounded-2xl p-4"><input required placeholder="اسم المريض" value={newPatient.name} onChange={e=>setNewPatient({...newPatient,name:e.target.value})} className="px-3 py-2 rounded-xl border"/><input required placeholder="الجوال" value={newPatient.phone} onChange={e=>setNewPatient({...newPatient,phone:e.target.value})} className="px-3 py-2 rounded-xl border"/><input placeholder="الإقامة/الهوية" value={newPatient.national_id} onChange={e=>setNewPatient({...newPatient,national_id:e.target.value})} className="px-3 py-2 rounded-xl border"/><input placeholder="شركة التأمين" value={newPatient.insurance_company} onChange={e=>setNewPatient({...newPatient,insurance_company:e.target.value})} className="px-3 py-2 rounded-xl border"/><button className="md:col-span-2 gradient-success text-white py-2 rounded-xl font-bold">حفظ المريض</button></form>}
+      {selected && <div className="mt-4 bg-sky-50 border border-sky-100 rounded-2xl p-4"><div className="flex justify-between gap-3 flex-wrap"><div><p className="text-lg font-black text-slate-800">{selected.name}</p><p className="text-sm text-slate-600">{selected.phone} • {selected.national_id || 'بدون إقامة'}</p><p className="text-xs text-violet-700 mt-1">{selected.insurance_company ? `${selected.insurance_company} • ${selected.insurance_policy_no || ''}` : 'لا يوجد تأمين مسجل'}</p></div><div className="text-xs text-emerald-700 font-bold">الأطباء النشطين الآن: {doctorsActive.length}</div></div></div>}
+    </div>
+  )
+}
+
+function PaymentModal({ apt, request, services, insuranceCompanies, form, setForm, onServiceChange, onSubmit, onClose }) {
+  const selectedService = services.find(s => s.id === form.service_id)
+  const titlePatient = apt?.patients?.name || request?.patients?.name
+  const titleDoctor = apt?.doctors?.name || request?.doctors?.name
+  const amountLocked = !!request
   return (
     <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4" dir="rtl">
       <div className="bg-white rounded-3xl p-6 shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="flex items-start justify-between gap-3 mb-5">
-          <div>
-            <h3 className="text-2xl font-black text-slate-800 flex items-center gap-2"><Receipt className="w-7 h-7 text-emerald-600" /> تسجيل الدفع</h3>
-            <p className="text-sm text-slate-500 mt-1">{apt.patients?.name} • {apt.doctors?.name}</p>
-          </div>
-          <button onClick={onClose} className="bg-slate-100 hover:bg-slate-200 p-2 rounded-xl"><X className="w-5 h-5" /></button>
-        </div>
-
-        {patientInsurance && (
-          <div className="bg-violet-50 border border-violet-100 rounded-2xl p-4 mb-4">
-            <p className="text-sm font-bold text-violet-800 flex items-center gap-2"><ShieldCheck className="w-5 h-5" /> لدى المريض تأمين: {patientInsurance}</p>
-            {apt.patients?.insurance_policy_no && <p className="text-xs text-violet-700 mt-1">رقم الوثيقة: {apt.patients.insurance_policy_no}</p>}
-          </div>
-        )}
-
+        <div className="flex items-start justify-between gap-3 mb-5"><div><h3 className="text-2xl font-black text-slate-800 flex items-center gap-2"><Receipt className="w-7 h-7 text-emerald-600" /> تسجيل الدفع</h3><p className="text-sm text-slate-500 mt-1">{titlePatient} • {titleDoctor}</p></div><button onClick={onClose} className="bg-slate-100 hover:bg-slate-200 p-2 rounded-xl"><X className="w-5 h-5" /></button></div>
+        {request && <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 mb-4"><p className="font-bold text-amber-800">طلب من الطبيب: {request.service_name}</p><p className="text-sm text-amber-700">المبلغ ثابت من سعر الخدمة ولا يمكن تعديله من الاستقبال.</p></div>}
         <form onSubmit={onSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">الخدمة</label>
-            <select value={form.service_id} onChange={(e) => onServiceChange(e.target.value)} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none">
-              <option value="">اختر الخدمة</option>
-              {services.map(s => <option key={s.id} value={s.id}>{s.name} - {s.price} ر.س</option>)}
-            </select>
-          </div>
-
-          {selectedService && (
-            <div className="grid grid-cols-3 gap-2 bg-slate-50 rounded-2xl p-3 text-center">
-              <div><p className="text-xs text-slate-500">السعر</p><p className="font-black text-slate-800">{selectedService.price || 0}</p></div>
-              <div><p className="text-xs text-slate-500">سعر التأمين</p><p className="font-black text-violet-700">{selectedService.insurance_price || 0}</p></div>
-              <div><p className="text-xs text-slate-500">الخصم</p><p className="font-black text-amber-700">{selectedService.discount_pct || 0}%</p></div>
-            </div>
-          )}
-
-          <div className="grid md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">طريقة الدفع</label>
-              <select value={form.payment_method} onChange={(e) => setForm({...form, payment_method: e.target.value})} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none">
-                <option value="cash">نقدي</option>
-                <option value="card">بطاقة</option>
-                <option value="transfer">تحويل</option>
-                <option value="insurance">تأمين</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">المبلغ المدفوع</label>
-              <input type="number" required value={form.amount} onChange={(e) => setForm({...form, amount: e.target.value})} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none font-bold" />
-            </div>
-          </div>
-
-          {form.payment_method === 'insurance' && (
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">شركة التأمين</label>
-              <select value={form.insurance_company_id} onChange={(e) => setForm({...form, insurance_company_id: e.target.value})} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none">
-                <option value="">اختر شركة التأمين</option>
-                {insuranceCompanies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-          )}
-
-          <div className="grid md:grid-cols-2 gap-4">
-            <input placeholder="رقم مرجعي / عملية الدفع" value={form.reference_no} onChange={(e) => setForm({...form, reference_no: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" />
-            <input placeholder="ملاحظات" value={form.notes} onChange={(e) => setForm({...form, notes: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" />
-          </div>
-
-          <button className="w-full py-4 gradient-success text-white rounded-2xl font-black shadow-xl flex items-center justify-center gap-2">
-            <CheckCircle className="w-5 h-5" /> تأكيد الدفع وتحويل المريض للدكتور
-          </button>
+          {!request && <div><label className="block text-sm font-bold text-slate-700 mb-1">الخدمة</label><select value={form.service_id} onChange={(e) => onServiceChange(e.target.value)} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none"><option value="">اختر الخدمة</option>{services.map(s => <option key={s.id} value={s.id}>{s.name} - {s.price} ر.س</option>)}</select></div>}
+          {selectedService && <div className="grid grid-cols-3 gap-2 bg-slate-50 rounded-2xl p-3 text-center"><div><p className="text-xs text-slate-500">السعر</p><p className="font-black text-slate-800">{selectedService.price || 0}</p></div><div><p className="text-xs text-slate-500">سعر التأمين</p><p className="font-black text-violet-700">{selectedService.insurance_price || 0}</p></div><div><p className="text-xs text-slate-500">الخصم</p><p className="font-black text-amber-700">{selectedService.discount_pct || 0}%</p></div></div>}
+          <div className="grid md:grid-cols-2 gap-4"><div><label className="block text-sm font-bold text-slate-700 mb-1">طريقة الدفع</label><select value={form.payment_method} onChange={(e) => setForm({...form, payment_method: e.target.value})} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none"><option value="cash">نقدي</option><option value="card">بطاقة</option><option value="transfer">تحويل</option><option value="insurance">تأمين</option></select></div><div><label className="block text-sm font-bold text-slate-700 mb-1">المبلغ</label><input type="number" readOnly value={form.amount} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl bg-slate-50 outline-none font-bold" /></div></div>
+          {form.payment_method === 'insurance' && <div><label className="block text-sm font-bold text-slate-700 mb-1">شركة التأمين</label><select value={form.insurance_company_id} onChange={(e) => setForm({...form, insurance_company_id: e.target.value})} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none"><option value="">اختر شركة التأمين</option>{insuranceCompanies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>}
+          <div className="grid md:grid-cols-2 gap-4"><input placeholder="رقم مرجعي" value={form.reference_no} onChange={(e) => setForm({...form, reference_no: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" /><input placeholder="ملاحظات" value={form.notes} onChange={(e) => setForm({...form, notes: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" /></div>
+          <button className="w-full py-4 gradient-success text-white rounded-2xl font-black shadow-xl flex items-center justify-center gap-2"><CheckCircle className="w-5 h-5" /> تأكيد الدفع</button>
         </form>
       </div>
     </div>
@@ -1938,24 +2084,8 @@ function PaymentModal({ apt, services, insuranceCompanies, form, setForm, onServ
 
 function ReceptionInsurance({ companies, patients }) {
   const insuredPatients = patients.filter((p, idx, arr) => p?.insurance_company && arr.findIndex(x => x?.id === p.id) === idx)
-  return (
-    <div className="grid lg:grid-cols-2 gap-6">
-      <div className="bg-white rounded-3xl p-6 shadow-xl border border-violet-100">
-        <h3 className="text-xl font-black text-slate-800 mb-4 flex items-center gap-2"><ShieldCheck className="w-6 h-6 text-violet-600" /> شركات التأمين</h3>
-        {companies.length === 0 ? <EmptyAdminState icon={ShieldCheck} message="لا توجد شركات تأمين" /> : (
-          <div className="space-y-2">{companies.map(c => <div key={c.id} className="bg-violet-50 rounded-xl p-3 flex items-center justify-between"><span className="font-bold text-slate-800">{c.name}</span><span className="text-xs text-violet-700">مفعّلة</span></div>)}</div>
-        )}
-      </div>
-      <div className="bg-white rounded-3xl p-6 shadow-xl border border-sky-100">
-        <h3 className="text-xl font-black text-slate-800 mb-4">مرضى لديهم تأمين في مواعيد اليوم</h3>
-        {insuredPatients.length === 0 ? <EmptyAdminState icon={Users} message="لا توجد بيانات تأمين للمرضى اليوم" /> : (
-          <div className="space-y-2">{insuredPatients.map(p => <div key={p.id} className="bg-sky-50 rounded-xl p-3"><p className="font-bold text-slate-800">{p.name}</p><p className="text-xs text-sky-700">{p.insurance_company} • {p.insurance_policy_no || 'بدون رقم وثيقة'}</p></div>)}</div>
-        )}
-      </div>
-    </div>
-  )
+  return <div className="grid lg:grid-cols-2 gap-6"><div className="bg-white rounded-3xl p-6 shadow-xl border border-violet-100"><h3 className="text-xl font-black text-slate-800 mb-4 flex items-center gap-2"><ShieldCheck className="w-6 h-6 text-violet-600" /> شركات التأمين</h3>{companies.length === 0 ? <EmptyAdminState icon={ShieldCheck} message="لا توجد شركات تأمين" /> : <div className="space-y-2">{companies.map(c => <div key={c.id} className="bg-violet-50 rounded-xl p-3 flex items-center justify-between"><span className="font-bold text-slate-800">{c.name}</span><span className="text-xs text-violet-700">مفعّلة</span></div>)}</div>}</div><div className="bg-white rounded-3xl p-6 shadow-xl border border-sky-100"><h3 className="text-xl font-black text-slate-800 mb-4">مرضى لديهم تأمين اليوم</h3>{insuredPatients.length === 0 ? <EmptyAdminState icon={Users} message="لا توجد بيانات تأمين للمرضى اليوم" /> : <div className="space-y-2">{insuredPatients.map(p => <div key={p.id} className="bg-sky-50 rounded-xl p-3"><p className="font-bold text-slate-800">{p.name}</p><p className="text-xs text-sky-700">{p.insurance_company} • {p.insurance_policy_no || 'بدون رقم وثيقة'}</p></div>)}</div>}</div></div>
 }
-
 
 function ReceptionAppointments({ appointments, onConfirm, onPaid, title }) {
   return (
@@ -2074,6 +2204,7 @@ function AccountantDashboard({ user, clinic, onLogout }) {
   const [records, setRecords] = useState([])
   const [payments, setPayments] = useState([])
   const [expenses, setExpenses] = useState([])
+  const [workSessions, setWorkSessions] = useState([])
   const [tab, setTab] = useState('dashboard')
   const [showExpenseForm, setShowExpenseForm] = useState(false)
   const [expenseForm, setExpenseForm] = useState({ description: '', amount: '', category: 'مصاريف متنوعة', payment_method: 'cash', date: new Date().toISOString().split('T')[0], vendor: '', notes: '' })
@@ -2085,14 +2216,16 @@ function AccountantDashboard({ user, clinic, onLogout }) {
   }, { column: 'clinic_id', value: clinic.id })
 
   const loadAccountingData = async () => {
-    const [r, p, e] = await Promise.all([
+    const [r, p, e, ws] = await Promise.all([
       supabase.from('medical_records').select('*, patients(name), doctors(name)').eq('clinic_id', clinic.id).order('created_at', { ascending: false }),
-      supabase.from('payments').select('*').eq('clinic_id', clinic.id).order('paid_at', { ascending: false }),
+      supabase.from('payments').select('*, patients(name, phone), appointments(doctor_id, doctors(name)), admin_users(full_name)').eq('clinic_id', clinic.id).order('paid_at', { ascending: false }),
       supabase.from('expenses').select('*').eq('clinic_id', clinic.id).order('date', { ascending: false }),
+      supabase.from('work_sessions').select('*').eq('clinic_id', clinic.id).order('clock_in', { ascending: false }).limit(100),
     ])
     setRecords(r.data || [])
     setPayments(p.data || [])
     setExpenses(e.data || [])
+    setWorkSessions(ws.data || [])
   }
 
   const addExpense = async (e) => {
@@ -2132,6 +2265,7 @@ function AccountantDashboard({ user, clinic, onLogout }) {
             { id: 'payments', label: 'الإيرادات', icon: Receipt },
             { id: 'expenses', label: 'المصروفات', icon: DollarSign },
             { id: 'import', label: 'استيراد Excel', icon: FileSpreadsheet },
+            { id: 'work', label: 'ساعات العمل', icon: Clock },
           ].map(t => (
             <button key={t.id} onClick={() => setTab(t.id)} className={`px-4 py-2 rounded-xl font-bold text-sm whitespace-nowrap flex items-center gap-1.5 ${tab === t.id ? 'gradient-purple text-white shadow-lg' : 'bg-white text-slate-700 border border-slate-100'}`}>
               <t.icon className="w-4 h-4" /> {t.label}
@@ -2158,6 +2292,7 @@ function AccountantDashboard({ user, clinic, onLogout }) {
           <ExpensesList expenses={expenses} showForm={showExpenseForm} setShowForm={setShowExpenseForm} form={expenseForm} setForm={setExpenseForm} onSubmit={addExpense} />
         )}
         {tab === 'import' && <ImportDataTab clinic={clinic} user={user} onDone={loadAccountingData} />}
+        {tab === 'work' && <WorkReportsTab sessions={workSessions} />}
       </div>
     </div>
   )
@@ -2404,6 +2539,27 @@ function ImportDataTab({ clinic, user, onDone }) {
   )
 }
 
+
+function WorkReportsTab({ sessions }) {
+  const grouped = {}
+  sessions.forEach(s => {
+    const key = `${s.user_type}-${s.user_id}`
+    if (!grouped[key]) grouped[key] = { name: s.user_name, role: s.role, minutes: 0, active: false, count: 0, lastIn: s.clock_in, lastOut: s.clock_out }
+    grouped[key].minutes += parseInt(s.total_minutes) || (s.clock_out ? 0 : Math.max(0, Math.round((new Date() - new Date(s.clock_in)) / 60000)))
+    grouped[key].active = grouped[key].active || !s.clock_out
+    grouped[key].count += 1
+    if (!grouped[key].lastIn || s.clock_in > grouped[key].lastIn) grouped[key].lastIn = s.clock_in
+    if (s.clock_out && (!grouped[key].lastOut || s.clock_out > grouped[key].lastOut)) grouped[key].lastOut = s.clock_out
+  })
+  const rows = Object.values(grouped)
+  return (
+    <div className="bg-white rounded-3xl p-6 shadow-xl border border-sky-100">
+      <h3 className="text-xl font-black text-slate-800 mb-4 flex items-center gap-2"><Clock className="w-6 h-6 text-sky-600" /> تقرير ساعات العمل</h3>
+      {rows.length === 0 ? <EmptyAdminState icon={Clock} message="لا توجد جلسات دوام" /> : <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="bg-slate-50"><tr><th className="p-3 text-right">الاسم</th><th className="p-3 text-right">الدور</th><th className="p-3 text-right">الحالة</th><th className="p-3 text-right">الساعات</th><th className="p-3 text-right">عدد الجلسات</th></tr></thead><tbody>{rows.map((r,i)=><tr key={i} className="border-t"><td className="p-3 font-bold">{r.name}</td><td className="p-3">{r.role}</td><td className="p-3"><span className={`px-2 py-1 rounded-full text-xs font-bold ${r.active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{r.active ? 'نشط' : 'غير نشط'}</span></td><td className="p-3 font-black">{formatMinutesArabic(r.minutes)}</td><td className="p-3">{r.count}</td></tr>)}</tbody></table></div>}
+    </div>
+  )
+}
+
 function AccountingSummary({ payments, expenses }) {
   return (
     <div className="grid md:grid-cols-2 gap-6">
@@ -2427,7 +2583,7 @@ function PaymentsList({ payments, records }) {
       <h3 className="text-xl font-black text-slate-800 mb-4">الإيرادات والمدفوعات</h3>
       {payments.length === 0 && records.length === 0 ? <EmptyAdminState icon={Receipt} message="لا توجد إيرادات" /> : (
         <div className="space-y-2">
-          {payments.map(p => <MoneyRow key={p.id} label={p.notes || p.payment_method} amount={p.amount} date={p.paid_at?.substring(0,10)} positive />)}
+          {payments.map(p => <MoneyRow key={p.id} label={`${p.patients?.name || 'مريض'} • استقبال: ${p.admin_users?.full_name || '-'} • دكتور: ${p.appointments?.doctors?.name || '-'}`} amount={p.amount} date={p.paid_at?.substring(0,10)} positive />)}
           {payments.length === 0 && records.map(r => <MoneyRow key={r.id} label={r.patients?.name || 'كشف'} amount={r.paid_amount} date={r.created_at?.substring(0,10)} positive />)}
         </div>
       )}
@@ -2473,6 +2629,91 @@ function MoneyRow({ label, amount, date, positive = false }) {
         <p className="text-xs text-slate-500">{date || '-'}</p>
       </div>
       <p className={`font-black ${positive ? 'text-emerald-600' : 'text-red-600'}`}>{positive ? '+' : '-'}{parseFloat(amount || 0).toFixed(0)} ر.س</p>
+    </div>
+  )
+}
+
+
+function useWorkSession({ clinic, userType, userId, userName, role }) {
+  const [session, setSession] = useState(null)
+  const [todayMinutes, setTodayMinutes] = useState(0)
+  const [tick, setTick] = useState(0)
+
+  useEffect(() => { loadSession() }, [clinic?.id, userId])
+  useEffect(() => {
+    const t = setInterval(() => setTick(x => x + 1), 60000)
+    return () => clearInterval(t)
+  }, [])
+
+  const loadSession = async () => {
+    if (!clinic?.id || !userId) return
+    const today = new Date().toISOString().split('T')[0]
+    const [active, sessions] = await Promise.all([
+      supabase.from('work_sessions').select('*').eq('clinic_id', clinic.id).eq('user_type', userType).eq('user_id', userId).is('clock_out', null).maybeSingle(),
+      supabase.from('work_sessions').select('*').eq('clinic_id', clinic.id).eq('user_type', userType).eq('user_id', userId).gte('clock_in', `${today}T00:00:00`)
+    ])
+    setSession(active.data || null)
+    const closedMinutes = (sessions.data || []).reduce((sum, s) => sum + (parseInt(s.total_minutes) || 0), 0)
+    setTodayMinutes(closedMinutes)
+  }
+
+  const start = async () => {
+    await loadSession()
+    const { data: existing } = await supabase.from('work_sessions').select('*').eq('clinic_id', clinic.id).eq('user_type', userType).eq('user_id', userId).is('clock_out', null).maybeSingle()
+    if (existing) { setSession(existing); return }
+    const { data, error } = await supabase.from('work_sessions').insert([{ clinic_id: clinic.id, user_type: userType, user_id: userId, user_name: userName, role }]).select().single()
+    if (error) return alert('❌ ' + error.message)
+    setSession(data)
+  }
+
+  const stop = async () => {
+    if (!session) return
+    const now = new Date()
+    const startDate = new Date(session.clock_in)
+    const total_minutes = Math.max(0, Math.round((now - startDate) / 60000))
+    const { error } = await supabase.from('work_sessions').update({ clock_out: now.toISOString(), total_minutes, status: 'closed' }).eq('id', session.id)
+    if (error) return alert('❌ ' + error.message)
+    setSession(null)
+    await loadSession()
+  }
+
+  const activeMinutes = session ? Math.max(0, Math.round((new Date() - new Date(session.clock_in)) / 60000)) : 0
+  const totalToday = todayMinutes + activeMinutes + tick * 0
+
+  return { active: !!session, session, todayMinutes: totalToday, start, stop, reload: loadSession }
+}
+
+function formatMinutesArabic(minutes) {
+  const h = Math.floor((minutes || 0) / 60)
+  const m = (minutes || 0) % 60
+  if (h <= 0) return `${m} دقيقة`
+  return `${h} ساعة و ${m} دقيقة`
+}
+
+function DutyGate({ clinic, userName, roleLabel, icon: Icon, work, onLogout }) {
+  return (
+    <div className="min-h-screen bg-pattern-subtle flex items-center justify-center p-4" dir="rtl">
+      <div className="bg-white rounded-3xl p-8 shadow-large border border-slate-100 max-w-md w-full text-center">
+        <div className="w-20 h-20 mx-auto gradient-medical rounded-3xl flex items-center justify-center shadow-medium mb-5 icon-pulse-ring">
+          <Icon className="w-10 h-10 text-white" />
+        </div>
+        <h1 className="text-2xl font-black text-slate-800 mb-2">أهلاً {userName}</h1>
+        <p className="text-slate-500 mb-6">لبدء استخدام لوحة {roleLabel} في {clinic.name}، اضغط بدء الدوام.</p>
+        <button onClick={work.start} className="w-full py-4 gradient-success text-white rounded-2xl font-black shadow-xl mb-3">بدء الدوام</button>
+        <button onClick={onLogout} className="w-full py-3 bg-slate-100 text-slate-700 rounded-2xl font-bold">تسجيل خروج</button>
+      </div>
+    </div>
+  )
+}
+
+function WorkStatusBar({ work }) {
+  return (
+    <div className="bg-white rounded-2xl p-4 shadow-soft border border-emerald-100 flex items-center justify-between gap-3 flex-wrap">
+      <div>
+        <p className="text-xs text-slate-500">حالة الدوام</p>
+        <p className="font-black text-emerald-700">نشط الآن • عملت اليوم {formatMinutesArabic(work.todayMinutes)}</p>
+      </div>
+      <button onClick={work.stop} className="gradient-danger text-white px-4 py-2 rounded-xl font-bold">خروج من الدوام</button>
     </div>
   )
 }
