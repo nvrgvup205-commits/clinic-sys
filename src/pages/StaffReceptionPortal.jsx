@@ -1738,7 +1738,8 @@ function ReceptionDashboard({ user, clinic, onLogout }) {
   const [activeSessions, setActiveSessions] = useState([])
   const [selectedPaymentApt, setSelectedPaymentApt] = useState(null)
   const [selectedPaymentRequest, setSelectedPaymentRequest] = useState(null)
-  const [paymentForm, setPaymentForm] = useState({ service_id: '', amount: '', payment_method: 'cash', insurance_company_id: '', reference_no: '', notes: '' })
+  const [selectedPaymentRequests, setSelectedPaymentRequests] = useState([])
+  const [paymentForm, setPaymentForm] = useState({ service_ids: [], amount: '', payment_method: 'cash', insurance_company_id: '', notes: '' })
   const [loading, setLoading] = useState(true)
   const [notification, setNotification] = useState(null)
   const work = useWorkSession({ clinic, userType: 'admin_user', userId: user.id, userName: user.full_name || user.username, role: 'receptionist' })
@@ -1792,41 +1793,71 @@ function ReceptionDashboard({ user, clinic, onLogout }) {
     setLoading(false)
   }
 
+  const calculateServicesTotal = (ids, method = paymentForm.payment_method) => {
+    return (ids || []).reduce((sum, id) => {
+      const srv = services.find(s => s.id === id)
+      if (!srv) return sum
+      const base = method === 'insurance' && parseFloat(srv.insurance_price || 0) > 0 ? parseFloat(srv.insurance_price) : parseFloat(srv.price || 0)
+      const discount = parseFloat(srv.discount_pct || 0)
+      return sum + Math.max(0, base - ((base * discount) / 100))
+    }, 0)
+  }
+
+  const updatePaymentServices = (ids, method = paymentForm.payment_method) => {
+    const total = calculateServicesTotal(ids, method)
+    setPaymentForm(prev => ({ ...prev, service_ids: ids, payment_method: method, amount: String(total.toFixed(0)) }))
+  }
+
   const confirmAppointment = async (apt) => {
     await supabase.from('appointments').update({ status: 'confirmed', confirmed_by: user.id, confirmed_at: new Date().toISOString() }).eq('id', apt.id)
   }
 
   const openPayment = (apt) => {
     const firstService = services[0]
-    const amount = firstService?.price || 0
+    const ids = firstService ? [firstService.id] : []
+    const method = apt.patients?.insurance_company ? 'insurance' : 'cash'
+    const amount = calculateServicesTotal(ids, method)
     setSelectedPaymentRequest(null)
+    setSelectedPaymentRequests([])
     setSelectedPaymentApt(apt)
-    setPaymentForm({ service_id: firstService?.id || '', amount: amount ? String(amount) : '', payment_method: apt.patients?.insurance_company ? 'insurance' : 'cash', insurance_company_id: '', reference_no: '', notes: '' })
+    setPaymentForm({ service_ids: ids, amount: String(amount.toFixed(0)), payment_method: method, insurance_company_id: '', notes: '' })
   }
 
   const openRequestPayment = (req) => {
+    const sameAppointmentPending = paymentRequests.filter(r => r.appointment_id === req.appointment_id && r.status === 'pending')
+    const total = sameAppointmentPending.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0)
     setSelectedPaymentApt(null)
     setSelectedPaymentRequest(req)
-    setPaymentForm({ service_id: req.service_id || '', amount: String(req.amount || 0), payment_method: 'cash', insurance_company_id: '', reference_no: '', notes: '' })
+    setSelectedPaymentRequests(sameAppointmentPending)
+    setPaymentForm({ service_ids: sameAppointmentPending.map(r => r.service_id).filter(Boolean), amount: String(total.toFixed(0)), payment_method: 'cash', insurance_company_id: '', notes: '' })
   }
 
-  const updatePaymentService = (serviceId) => {
-    const srv = services.find(s => s.id === serviceId)
-    const price = paymentForm.payment_method === 'insurance' && srv?.insurance_price ? srv.insurance_price : srv?.price
-    setPaymentForm({ ...paymentForm, service_id: serviceId, amount: price ? String(price) : '' })
+  const updatePaymentService = (serviceIds, method = paymentForm.payment_method) => {
+    updatePaymentServices(Array.isArray(serviceIds) ? serviceIds : [serviceIds].filter(Boolean), method)
   }
 
   const submitPayment = async (e) => {
     e.preventDefault()
-    const target = selectedPaymentApt || selectedPaymentRequest
-    if (!target) return
     const amount = parseFloat(paymentForm.amount) || 0
     if (amount <= 0) return alert('المبلغ غير صحيح')
 
-    const srv = services.find(s => s.id === paymentForm.service_id)
     const now = new Date().toISOString()
+    const isRequestPayment = selectedPaymentRequests.length > 0
     const patientId = selectedPaymentApt?.patient_id || selectedPaymentRequest?.patient_id
     const appointmentId = selectedPaymentApt?.id || selectedPaymentRequest?.appointment_id
+
+    const items = isRequestPayment
+      ? selectedPaymentRequests.map(r => ({ id: r.service_id, request_id: r.id, name: r.service_name, qty: 1, price: parseFloat(r.amount || 0) }))
+      : (paymentForm.service_ids || []).map(id => {
+          const srv = services.find(s => s.id === id)
+          if (!srv) return null
+          const base = paymentForm.payment_method === 'insurance' && parseFloat(srv.insurance_price || 0) > 0 ? parseFloat(srv.insurance_price) : parseFloat(srv.price || 0)
+          const discount = parseFloat(srv.discount_pct || 0)
+          const net = Math.max(0, base - ((base * discount) / 100))
+          return { id: srv.id, name: srv.name, qty: 1, price: net, original_price: srv.price || 0, insurance_price: srv.insurance_price || 0, discount_pct: discount }
+        }).filter(Boolean)
+
+    if (items.length === 0) return alert('اختر خدمة واحدة على الأقل')
 
     const { data: generatedInvoiceNo } = await supabase.rpc('generate_invoice_no', { p_clinic_id: clinic.id })
     const invoiceNo = generatedInvoiceNo || `INV-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Date.now()}`
@@ -1836,7 +1867,7 @@ function ReceptionDashboard({ user, clinic, onLogout }) {
       patient_id: patientId,
       appointment_id: appointmentId,
       invoice_no: invoiceNo,
-      items: [{ id: srv?.id || selectedPaymentRequest?.service_id, name: srv?.name || selectedPaymentRequest?.service_name || 'خدمة', qty: 1, price: amount }],
+      items,
       subtotal: amount,
       total: amount,
       paid_amount: amount,
@@ -1854,21 +1885,21 @@ function ReceptionDashboard({ user, clinic, onLogout }) {
       invoice_id: invoice?.id,
       amount,
       payment_method: paymentForm.payment_method,
-      reference_no: paymentForm.reference_no || null,
       received_by: user.id,
-      notes: paymentForm.notes || (selectedPaymentRequest ? `دفع طلب خدمة: ${selectedPaymentRequest.service_name}` : `دفع كشف: ${srv?.name || 'خدمة'}`),
+      notes: paymentForm.notes || (isRequestPayment ? `دفع ${items.length} خدمات إضافية` : `دفع كشف / خدمات أساسية`),
     }])
     if (error) return alert('❌ ' + error.message)
 
-    if (selectedPaymentRequest) {
-      await supabase.from('payment_requests').update({ status: 'paid', paid_by: user.id, paid_at: now }).eq('id', selectedPaymentRequest.id)
+    if (isRequestPayment) {
+      await Promise.all(selectedPaymentRequests.map(r => supabase.from('payment_requests').update({ status: 'paid', paid_by: user.id, paid_at: now }).eq('id', r.id)))
     } else {
-      await supabase.from('appointments').update({ service_id: paymentForm.service_id || null, paid_by: user.id, paid_at: now, checked_in_by: user.id, checked_in_at: now, status: selectedPaymentApt.status === 'pending' ? 'confirmed' : selectedPaymentApt.status }).eq('id', selectedPaymentApt.id)
+      await supabase.from('appointments').update({ service_id: paymentForm.service_ids?.[0] || null, paid_by: user.id, paid_at: now, checked_in_by: user.id, checked_in_at: now, status: selectedPaymentApt.status === 'pending' ? 'confirmed' : selectedPaymentApt.status }).eq('id', selectedPaymentApt.id)
     }
 
     setSelectedPaymentApt(null)
     setSelectedPaymentRequest(null)
-    alert('✓ تم تسجيل الدفع بنجاح')
+    setSelectedPaymentRequests([])
+    alert(`✓ تم تسجيل الدفع بنجاح\nرقم الفاتورة: ${invoiceNo}`)
     loadReceptionData()
   }
 
@@ -1950,6 +1981,7 @@ function ReceptionDashboard({ user, clinic, onLogout }) {
         <PaymentModal
           apt={selectedPaymentApt}
           request={selectedPaymentRequest}
+          requests={selectedPaymentRequests}
           services={services}
           insuranceCompanies={insuranceCompanies}
           form={paymentForm}
@@ -2062,23 +2094,107 @@ function ReceptionQuickSearch({ clinic, services, doctorsActive, onRefresh }) {
   )
 }
 
-function PaymentModal({ apt, request, services, insuranceCompanies, form, setForm, onServiceChange, onSubmit, onClose }) {
-  const selectedService = services.find(s => s.id === form.service_id)
+function PaymentModal({ apt, request, requests = [], services, insuranceCompanies, form, setForm, onServiceChange, onSubmit, onClose }) {
   const titlePatient = apt?.patients?.name || request?.patients?.name
   const titleDoctor = apt?.doctors?.name || request?.doctors?.name
-  const amountLocked = !!request
+  const isRequestPayment = requests.length > 0
+
+  const toggleService = (id) => {
+    const current = form.service_ids || []
+    const next = current.includes(id) ? current.filter(x => x !== id) : [...current, id]
+    onServiceChange(next)
+  }
+
+  const changeMethod = (method) => {
+    if (isRequestPayment) setForm({ ...form, payment_method: method })
+    else onServiceChange(form.service_ids || [], method)
+  }
+
+  const selectedServices = services.filter(s => (form.service_ids || []).includes(s.id))
+
   return (
     <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4" dir="rtl">
-      <div className="bg-white rounded-3xl p-6 shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="flex items-start justify-between gap-3 mb-5"><div><h3 className="text-2xl font-black text-slate-800 flex items-center gap-2"><Receipt className="w-7 h-7 text-emerald-600" /> تسجيل الدفع</h3><p className="text-sm text-slate-500 mt-1">{titlePatient} • {titleDoctor}</p></div><button onClick={onClose} className="bg-slate-100 hover:bg-slate-200 p-2 rounded-xl"><X className="w-5 h-5" /></button></div>
-        {request && <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 mb-4"><p className="font-bold text-amber-800">طلب من الطبيب: {request.service_name}</p><p className="text-sm text-amber-700">المبلغ ثابت من سعر الخدمة ولا يمكن تعديله من الاستقبال.</p></div>}
+      <div className="bg-white rounded-3xl p-6 shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="flex items-start justify-between gap-3 mb-5">
+          <div>
+            <h3 className="text-2xl font-black text-slate-800 flex items-center gap-2"><Receipt className="w-7 h-7 text-emerald-600" /> مراجعة وتسجيل الدفع</h3>
+            <p className="text-sm text-slate-500 mt-1">{titlePatient} • {titleDoctor || 'بدون طبيب'}</p>
+          </div>
+          <button onClick={onClose} className="bg-slate-100 hover:bg-slate-200 p-2 rounded-xl"><X className="w-5 h-5" /></button>
+        </div>
+
+        {apt?.patients && (
+          <div className="bg-sky-50 border border-sky-100 rounded-2xl p-4 mb-4 grid md:grid-cols-2 gap-2 text-sm">
+            <p><strong>المريض:</strong> {apt.patients.name}</p>
+            <p><strong>الجوال:</strong> {apt.patients.phone}</p>
+            <p><strong>الهوية/الإقامة:</strong> {apt.patients.national_id || '-'}</p>
+            <p><strong>التأمين:</strong> {apt.patients.insurance_company || 'لا يوجد'}</p>
+            <p><strong>رقم الوثيقة:</strong> {apt.patients.insurance_policy_no || '-'}</p>
+          </div>
+        )}
+
+        {isRequestPayment && (
+          <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 mb-4">
+            <p className="font-black text-amber-800 mb-2">طلبات خدمات إضافية من الطبيب</p>
+            {requests.map(r => <div key={r.id} className="flex justify-between text-sm py-1"><span>{r.service_name}</span><strong>{parseFloat(r.amount || 0).toFixed(0)} ر.س</strong></div>)}
+            <p className="text-xs text-amber-700 mt-2">المبلغ ثابت من أسعار الخدمات ولا يمكن تعديله من الاستقبال.</p>
+          </div>
+        )}
+
         <form onSubmit={onSubmit} className="space-y-4">
-          {!request && <div><label className="block text-sm font-bold text-slate-700 mb-1">الخدمة</label><select value={form.service_id} onChange={(e) => onServiceChange(e.target.value)} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none"><option value="">اختر الخدمة</option>{services.map(s => <option key={s.id} value={s.id}>{s.name} - {s.price} ر.س</option>)}</select></div>}
-          {selectedService && <div className="grid grid-cols-3 gap-2 bg-slate-50 rounded-2xl p-3 text-center"><div><p className="text-xs text-slate-500">السعر</p><p className="font-black text-slate-800">{selectedService.price || 0}</p></div><div><p className="text-xs text-slate-500">سعر التأمين</p><p className="font-black text-violet-700">{selectedService.insurance_price || 0}</p></div><div><p className="text-xs text-slate-500">الخصم</p><p className="font-black text-amber-700">{selectedService.discount_pct || 0}%</p></div></div>}
-          <div className="grid md:grid-cols-2 gap-4"><div><label className="block text-sm font-bold text-slate-700 mb-1">طريقة الدفع</label><select value={form.payment_method} onChange={(e) => setForm({...form, payment_method: e.target.value})} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none"><option value="cash">نقدي</option><option value="card">بطاقة</option><option value="transfer">تحويل</option><option value="insurance">تأمين</option></select></div><div><label className="block text-sm font-bold text-slate-700 mb-1">المبلغ</label><input type="number" readOnly value={form.amount} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl bg-slate-50 outline-none font-bold" /></div></div>
-          {form.payment_method === 'insurance' && <div><label className="block text-sm font-bold text-slate-700 mb-1">شركة التأمين</label><select value={form.insurance_company_id} onChange={(e) => setForm({...form, insurance_company_id: e.target.value})} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none"><option value="">اختر شركة التأمين</option>{insuranceCompanies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>}
-          <div className="grid md:grid-cols-2 gap-4"><input placeholder="رقم مرجعي" value={form.reference_no} onChange={(e) => setForm({...form, reference_no: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" /><input placeholder="ملاحظات" value={form.notes} onChange={(e) => setForm({...form, notes: e.target.value})} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" /></div>
-          <button className="w-full py-4 gradient-success text-white rounded-2xl font-black shadow-xl flex items-center justify-center gap-2"><CheckCircle className="w-5 h-5" /> تأكيد الدفع</button>
+          {!isRequestPayment && (
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-2">اختر الخدمات المطلوبة في نفس الفاتورة</label>
+              <div className="grid md:grid-cols-2 gap-2">
+                {services.map(s => {
+                  const checked = (form.service_ids || []).includes(s.id)
+                  const price = form.payment_method === 'insurance' && parseFloat(s.insurance_price || 0) > 0 ? s.insurance_price : s.price
+                  return (
+                    <label key={s.id} className={`border-2 rounded-xl p-3 cursor-pointer flex items-center justify-between gap-2 ${checked ? 'border-emerald-300 bg-emerald-50' : 'border-slate-100 bg-slate-50'}`}>
+                      <span><input type="checkbox" checked={checked} onChange={() => toggleService(s.id)} className="ml-2" />{s.name}</span>
+                      <strong>{parseFloat(price || 0).toFixed(0)} ر.س</strong>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1">طريقة الدفع</label>
+              <select value={form.payment_method} onChange={(e) => changeMethod(e.target.value)} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none">
+                <option value="cash">نقدي</option>
+                <option value="card">مدى / بطاقة</option>
+                <option value="insurance">تأمين</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1">الإجمالي</label>
+              <input type="number" readOnly value={form.amount} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl bg-slate-50 outline-none font-bold" />
+            </div>
+          </div>
+
+          {form.payment_method === 'insurance' && (
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1">شركة التأمين</label>
+              <select value={form.insurance_company_id} onChange={(e) => setForm({...form, insurance_company_id: e.target.value})} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none">
+                <option value="">اختر شركة التأمين</option>
+                {insuranceCompanies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+          )}
+
+          {!isRequestPayment && selectedServices.length > 0 && (
+            <div className="bg-slate-50 rounded-2xl p-4">
+              <p className="font-black text-slate-800 mb-2">ملخص الفاتورة</p>
+              {selectedServices.map(s => <div key={s.id} className="flex justify-between text-sm py-1"><span>{s.name}</span><strong>{(form.payment_method === 'insurance' && parseFloat(s.insurance_price || 0) > 0 ? s.insurance_price : s.price) || 0} ر.س</strong></div>)}
+            </div>
+          )}
+
+          <input placeholder="ملاحظات اختيارية" value={form.notes} onChange={(e) => setForm({...form, notes: e.target.value})} className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" />
+
+          <button className="w-full py-4 gradient-success text-white rounded-2xl font-black shadow-xl flex items-center justify-center gap-2"><CheckCircle className="w-5 h-5" /> إنشاء فاتورة وتأكيد الدفع</button>
         </form>
       </div>
     </div>
