@@ -1514,7 +1514,6 @@ function ExaminationView({ apt, clinic, services, doctor, onClose }) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-cyan-50 page-enter" dir="rtl">
-      <RealtimeToast notification={notification} />
       <header className="gradient-success shadow-2xl sticky top-0 z-40">
         <div className="max-w-5xl mx-auto px-4 py-5 flex items-center justify-between">
           <div>
