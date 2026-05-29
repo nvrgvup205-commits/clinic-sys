@@ -211,6 +211,7 @@ function StaffLogin({ clinic, onSuccess }) {
 // ═══════════════════════════════════════════════════════════
 function AdminDashboard({ user, clinic, onLogout, setClinic }) {
   const [tab, setTab] = useState('dashboard')
+  const [notification, setNotification] = useState(null)
   const [stats, setStats] = useState({ patients: 0, doctors: 0, todayAppts: 0, openComplaints: 0, totalRevenue: 0, monthRevenue: 0 })
   const [patients, setPatients] = useState([])
   const [doctors, setDoctors] = useState([])
@@ -221,7 +222,6 @@ function AdminDashboard({ user, clinic, onLogout, setClinic }) {
   const [payments, setPayments] = useState([])
   const [staffUsers, setStaffUsers] = useState([])
   const [workSessions, setWorkSessions] = useState([])
-  const [notification, setNotification] = useState(null)
 
   useEffect(() => { loadAll() }, [])
 
@@ -249,15 +249,24 @@ function AdminDashboard({ user, clinic, onLogout, setClinic }) {
 
 
   useRealtime('payments', (payload) => {
-    if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) loadAll()
+    if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) {
+      loadAll()
+      notifyFromPayload('payments', payload, setNotification)
+    }
   }, { column: 'clinic_id', value: clinic.id })
 
   useRealtime('work_sessions', (payload) => {
-    if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) loadAll()
+    if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) {
+      loadAll()
+      notifyFromPayload('work_sessions', payload, setNotification)
+    }
   }, { column: 'clinic_id', value: clinic.id })
 
   useRealtime('admin_users', (payload) => {
-    if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) loadAll()
+    if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) {
+      loadAll()
+      notifyFromPayload('admin_users', payload, setNotification)
+    }
   }, { column: 'clinic_id', value: clinic.id })
 
   const loadAll = async () => {
@@ -302,6 +311,7 @@ function AdminDashboard({ user, clinic, onLogout, setClinic }) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-sky-50 via-cyan-50 to-emerald-50 page-enter" dir="rtl">
+      <RealtimeToast notification={notification} />
       {notification && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 animate-slide-up">
           <div className="px-6 py-3 rounded-2xl shadow-2xl font-bold flex items-center gap-2 gradient-medical text-white">
@@ -1436,6 +1446,7 @@ function DoctorDashboard({ user, clinic, onLogout }) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-cyan-50 page-enter" dir="rtl">
+      <RealtimeToast notification={notification} />
       {notification && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 animate-slide-up">
           <div className="px-6 py-3 rounded-2xl shadow-2xl font-bold gradient-success text-white flex items-center gap-2">
@@ -1684,6 +1695,7 @@ function ExaminationView({ apt, clinic, services, doctor, onClose }) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-cyan-50 page-enter" dir="rtl">
+      <RealtimeToast notification={notification} />
       <header className="gradient-success shadow-2xl sticky top-0 z-40">
         <div className="max-w-5xl mx-auto px-4 py-5 flex items-center justify-between">
           <div>
@@ -1930,15 +1942,15 @@ function ReceptionDashboard({ user, clinic, onLogout }) {
   useRealtime('payment_requests', (payload) => {
     if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) {
       loadReceptionData()
-      if (payload.eventType === 'INSERT') {
-        setNotification('💳 طلب دفع جديد من الطبيب')
-        setTimeout(() => setNotification(null), 5000)
-      }
+      notifyFromPayload('payment_requests', payload, setNotification)
     }
   }, { column: 'clinic_id', value: clinic.id })
 
   useRealtime('work_sessions', (payload) => {
-    if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) loadReceptionData()
+    if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) {
+      loadReceptionData()
+      notifyFromPayload('work_sessions', payload, setNotification)
+    }
   }, { column: 'clinic_id', value: clinic.id })
 
   const loadReceptionData = async () => {
@@ -2064,6 +2076,7 @@ function ReceptionDashboard({ user, clinic, onLogout }) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-sky-50 to-cyan-50 page-enter" dir="rtl">
+      <RealtimeToast notification={notification} />
       {notification && <Toast msg={notification} gradient="gradient-warning" />}
       <StaffHeader title="شاشة الاستقبال" subtitle={`${user.full_name || user.username} • ${clinic.name}`} icon={Users} gradient="gradient-medical-dark" onLogout={async () => { if (work.active) await work.endShift(); onLogout() }} />
 
@@ -2387,7 +2400,17 @@ function AccountantDashboard({ user, clinic, onLogout }) {
   useEffect(() => { loadAccountingData() }, [])
 
   useRealtime('payments', (payload) => {
-    if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) loadAccountingData()
+    if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) {
+      loadAccountingData()
+      notifyFromPayload('payments', payload, setNotification)
+    }
+  }, { column: 'clinic_id', value: clinic.id })
+
+  useRealtime('work_sessions', (payload) => {
+    if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) {
+      loadAccountingData()
+      notifyFromPayload('work_sessions', payload, setNotification)
+    }
   }, { column: 'clinic_id', value: clinic.id })
 
   const loadAccountingData = async () => {
@@ -2431,6 +2454,7 @@ function AccountantDashboard({ user, clinic, onLogout }) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-violet-50 via-sky-50 to-emerald-50 page-enter" dir="rtl">
+      <RealtimeToast notification={notification} />
       <StaffHeader title="لوحة المحاسب" subtitle={`${user.full_name || user.username} • ${clinic.name}`} icon={DollarSign} gradient="gradient-medical-dark" onLogout={onLogout} />
 
       <div className="max-w-7xl mx-auto px-4 pt-4">
@@ -2808,6 +2832,67 @@ function MoneyRow({ label, amount, date, positive = false }) {
   )
 }
 
+
+
+function notifyFromPayload(table, payload, setNotification, currentUserId = null) {
+  const row = payload.new || payload.old || {}
+  const event = payload.eventType
+  let msg = ''
+
+  if (table === 'work_sessions') {
+    if (event === 'INSERT') msg = `${row.user_name || 'موظف'} بدأ الدوام`
+    else if (event === 'UPDATE') {
+      if (row.status === 'break') msg = `${row.user_name || 'موظف'} في استراحة مؤقتة`
+      else if (row.status === 'active') msg = `${row.user_name || 'موظف'} عاد من الاستراحة`
+      else if (row.status === 'closed' || row.clock_out) msg = `${row.user_name || 'موظف'} خرج من الدوام`
+    }
+  }
+
+  if (table === 'payments') {
+    if (event === 'INSERT') msg = `تم تسجيل دفعة جديدة ${row.amount ? `بقيمة ${Number(row.amount).toFixed(0)} ر.س` : ''}`
+  }
+
+  if (table === 'invoices') {
+    if (event === 'INSERT') msg = `تم إصدار فاتورة ${row.invoice_no || ''}`
+  }
+
+  if (table === 'appointments') {
+    if (event === 'INSERT') msg = 'تم تسجيل حجز جديد'
+    else if (event === 'UPDATE') {
+      if (row.paid_at) msg = 'تم دفع موعد وتحويله للطبيب'
+      else if (row.status === 'confirmed') msg = 'تم تأكيد موعد'
+      else if (row.status === 'cancelled') msg = 'تم إلغاء موعد'
+      else if (row.status === 'completed') msg = 'تم اكتمال كشف'
+      else if (row.doctor_started_at) msg = 'بدأ الطبيب الكشف'
+    }
+  }
+
+  if (table === 'payment_requests') {
+    if (event === 'INSERT') msg = 'طلب دفع جديد من الطبيب'
+    else if (event === 'UPDATE' && row.status === 'paid') msg = 'تم دفع طلب خدمة إضافية'
+  }
+
+  if (table === 'complaints' && event === 'INSERT') msg = 'شكوى جديدة'
+  if (table === 'emergency_requests' && event === 'INSERT') msg = 'طلب طوارئ جديد'
+  if (table === 'patients' && event === 'INSERT') msg = 'تم إضافة مريض جديد'
+  if (table === 'medical_records' && event === 'INSERT') msg = 'تم حفظ كشف طبي جديد'
+
+  if (msg && setNotification) {
+    setNotification({ type: table, msg })
+    setTimeout(() => setNotification(null), 5000)
+  }
+}
+
+function RealtimeToast({ notification }) {
+  if (!notification) return null
+  return (
+    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] animate-slide-up">
+      <div className="px-6 py-3 rounded-2xl shadow-2xl font-bold flex items-center gap-2 gradient-medical text-white">
+        <Bell className="w-5 h-5" /> {notification.msg || notification}
+      </div>
+    </div>
+  )
+}
 
 function useWorkSession({ clinic, userType, userId, userName, role }) {
   const [session, setSession] = useState(null)
