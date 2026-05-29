@@ -2208,25 +2208,32 @@ function AccountantDashboard({ user, clinic, onLogout }) {
   const [tab, setTab] = useState('dashboard')
   const [showExpenseForm, setShowExpenseForm] = useState(false)
   const [expenseForm, setExpenseForm] = useState({ description: '', amount: '', category: 'مصاريف متنوعة', payment_method: 'cash', date: new Date().toISOString().split('T')[0], vendor: '', notes: '' })
-
-  useEffect(() => { loadAccountingData() }, [])
-
-  useRealtime('payments', (payload) => {
-    if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) loadAccountingData()
-  }, { column: 'clinic_id', value: clinic.id })
-
-  const loadAccountingData = async () => {
-    const [r, p, e, ws] = await Promise.all([
-      supabase.from('medical_records').select('*, patients(name), doctors(name)').eq('clinic_id', clinic.id).order('created_at', { ascending: false }),
-      supabase.from('payments').select('*, patients(name, phone), appointments(doctor_id, doctors(name)), admin_users(full_name)').eq('clinic_id', clinic.id).order('paid_at', { ascending: false }),
-      supabase.from('expenses').select('*').eq('clinic_id', clinic.id).order('date', { ascending: false }),
-      supabase.from('work_sessions').select('*').eq('clinic_id', clinic.id).order('clock_in', { ascending: false }).limit(100),
-    ])
-    setRecords(r.data || [])
-    setPayments(p.data || [])
-    setExpenses(e.data || [])
-    setWorkSessions(ws.data || [])
+useEffect(() => { loadAccountingData() }, [])
+useRealtime('payments', (payload) => {
+  if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) {
+    loadAccountingData()
   }
+}, { column: 'clinic_id', value: clinic.id })
+
+useRealtime('work_sessions', (payload) => {
+  if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) {
+    loadAccountingData()
+  }
+}, { column: 'clinic_id', value: clinic.id })
+
+const loadAccountingData = async () => {
+  const [r, p, e, ws] = await Promise.all([
+    supabase.from('medical_records').select('*, patients(name), doctors(name)').eq('clinic_id', clinic.id).order('created_at', { ascending: false }),
+    supabase.from('payments').select('*, patients(name, phone), appointments(doctor_id, doctors(name)), admin_users(full_name)').eq('clinic_id', clinic.id).order('paid_at', { ascending: false }),
+    supabase.from('expenses').select('*').eq('clinic_id', clinic.id).order('date', { ascending: false }),
+    supabase.from('work_sessions').select('*').eq('clinic_id', clinic.id).order('clock_in', { ascending: false }).limit(100),
+  ])
+
+  setRecords(r.data || [])
+  setPayments(p.data || [])
+  setExpenses(e.data || [])
+  setWorkSessions(ws.data || [])
+}
 
   const addExpense = async (e) => {
     e.preventDefault()
