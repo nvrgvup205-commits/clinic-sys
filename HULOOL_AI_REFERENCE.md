@@ -179,6 +179,7 @@ payment_requests     -- طلبات الدفع من الدكتور للاستقب
 work_sessions        -- جلسات الدوام
 invoices             -- الفواتير
 payments             -- المدفوعات
+emergency_requests   -- طلبات الطوارئ
 ```
 
 ### أعمدة مهمة في appointments

@@ -105,6 +105,25 @@ CREATE TABLE IF NOT EXISTS payments (
     refunded_by UUID DEFAULT NULL,
     refunded_at TIMESTAMPTZ DEFAULT NULL,
     notes TEXT DEFAULT NULL,
+    paid_at TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 6.5. جدول طلبات الطوارئ (emergency_requests)
+-- ═══════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS emergency_requests (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    clinic_id UUID NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
+    patient_id UUID REFERENCES patients(id) ON DELETE SET NULL,
+    patient_name TEXT NOT NULL,
+    patient_phone TEXT NOT NULL,
+    description TEXT NOT NULL,
+    priority TEXT DEFAULT 'normal' CHECK (priority IN ('normal', 'urgent', 'critical')),
+    status TEXT DEFAULT 'open' CHECK (status IN ('open', 'in_progress', 'closed')),
+    handled_by UUID DEFAULT NULL,
+    handled_at TIMESTAMPTZ DEFAULT NULL,
+    notes TEXT DEFAULT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -172,6 +191,9 @@ CREATE INDEX IF NOT EXISTS idx_invoices_patient ON invoices(patient_id);
 CREATE INDEX IF NOT EXISTS idx_payments_clinic ON payments(clinic_id);
 CREATE INDEX IF NOT EXISTS idx_payments_patient ON payments(patient_id);
 
+CREATE INDEX IF NOT EXISTS idx_emergency_requests_clinic ON emergency_requests(clinic_id);
+CREATE INDEX IF NOT EXISTS idx_emergency_requests_status ON emergency_requests(clinic_id, status);
+
 CREATE INDEX IF NOT EXISTS idx_expenses_clinic ON expenses(clinic_id);
 CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(clinic_id, date);
 
@@ -188,6 +210,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE invoices;
 ALTER PUBLICATION supabase_realtime ADD TABLE payments;
 ALTER PUBLICATION supabase_realtime ADD TABLE medical_records;
 ALTER PUBLICATION supabase_realtime ADD TABLE complaints;
+ALTER PUBLICATION supabase_realtime ADD TABLE emergency_requests;
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- 11. RLS Policies (صلاحيات - مفتوحة للتجربة، شدّدها للإنتاج)
@@ -212,6 +235,11 @@ CREATE POLICY "Allow all invoices" ON invoices FOR ALL USING (true) WITH CHECK (
 ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow all payments" ON payments;
 CREATE POLICY "Allow all payments" ON payments FOR ALL USING (true) WITH CHECK (true);
+
+-- emergency_requests
+ALTER TABLE emergency_requests ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all emergency_requests" ON emergency_requests;
+CREATE POLICY "Allow all emergency_requests" ON emergency_requests FOR ALL USING (true) WITH CHECK (true);
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- تم بنجاح! 
