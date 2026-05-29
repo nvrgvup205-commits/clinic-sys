@@ -357,7 +357,7 @@ function AdminDashboard({ user, clinic, onLogout, setClinic }) {
 
       <div className="max-w-7xl mx-auto p-4 sm:p-6">
         {tab === 'dashboard' && <DashTab stats={stats} appointments={appointments} setTab={setTab} />}
-        {tab === 'reports' && <ReportsTab appointments={appointments} records={records} patients={patients} doctors={doctors} />}
+        {tab === 'reports' && <ReportsTab appointments={appointments} records={records} payments={payments} patients={patients} doctors={doctors} />}
         {tab === 'patients' && <PatientsTab patients={patients} clinic={clinic} />}
         {tab === 'doctors' && <DoctorsTab doctors={doctors} clinic={clinic} />}
         {tab === 'appointments' && <AppointmentsManageTab appointments={appointments} />}
@@ -439,7 +439,7 @@ function AdminApptCard({ apt }) {
 }
 
 // ───── Reports ─────
-function ReportsTab({ appointments, records, patients, doctors }) {
+function ReportsTab({ appointments, records, payments = [], patients, doctors }) {
   const apptByType = {
     first_visit: appointments.filter(a => a.type === 'first_visit').length,
     follow_up: appointments.filter(a => a.type === 'follow_up').length,
@@ -456,17 +456,26 @@ function ReportsTab({ appointments, records, patients, doctors }) {
   }
 
   const monthlyRevenue = {}
-  records.forEach(r => {
-    const month = r.created_at?.substring(0, 7)
-    if (month) monthlyRevenue[month] = (monthlyRevenue[month] || 0) + (parseFloat(r.paid_amount) || 0)
+  const revenueSource = payments.length > 0 ? payments : records.map(r => ({ paid_at: r.created_at, amount: r.paid_amount }))
+  revenueSource.forEach(r => {
+    const month = (r.paid_at || r.created_at)?.substring(0, 7)
+    if (month) monthlyRevenue[month] = (monthlyRevenue[month] || 0) + (parseFloat(r.amount ?? r.paid_amount) || 0)
   })
   const sortedMonths = Object.keys(monthlyRevenue).sort().slice(-6)
   const maxRevenue = Math.max(...Object.values(monthlyRevenue), 1)
 
+  const paymentMethodStats = payments.reduce((acc, p) => {
+    const key = p.payment_method || 'cash'
+    acc[key] = (acc[key] || 0) + (parseFloat(p.amount) || 0)
+    return acc
+  }, {})
+
   const doctorStats = doctors.map(d => ({
     name: d.name,
     appointments: appointments.filter(a => a.doctor_id === d.id).length,
-    revenue: records.filter(r => r.doctor_id === d.id).reduce((sum, r) => sum + (parseFloat(r.paid_amount) || 0), 0)
+    revenue: payments.length > 0
+      ? payments.filter(p => p.appointments?.doctor_id === d.id).reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0)
+      : records.filter(r => r.doctor_id === d.id).reduce((sum, r) => sum + (parseFloat(r.paid_amount) || 0), 0)
   })).sort((a, b) => b.appointments - a.appointments)
 
   const exportCSV = () => {
@@ -488,6 +497,21 @@ function ReportsTab({ appointments, records, patients, doctors }) {
         <button onClick={exportCSV} className="gradient-success text-white px-5 py-3 rounded-2xl font-bold shadow-xl btn-medical flex items-center gap-2">
           📥 تصدير CSV
         </button>
+      </div>
+
+      <div className="grid md:grid-cols-3 gap-4">
+        <div className="bg-white rounded-3xl p-6 shadow-xl border border-emerald-100">
+          <p className="text-sm text-slate-500">إجمالي المدفوعات</p>
+          <p className="text-3xl font-black text-emerald-600">{payments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0).toFixed(0)} ر.س</p>
+        </div>
+        <div className="bg-white rounded-3xl p-6 shadow-xl border border-sky-100">
+          <p className="text-sm text-slate-500">عدد عمليات الدفع</p>
+          <p className="text-3xl font-black text-sky-600">{payments.length}</p>
+        </div>
+        <div className="bg-white rounded-3xl p-6 shadow-xl border border-violet-100">
+          <p className="text-sm text-slate-500">طرق الدفع</p>
+          <p className="text-sm font-bold text-violet-700 mt-2">{Object.entries(paymentMethodStats).map(([k,v]) => `${k}: ${Number(v).toFixed(0)} ر.س`).join(' • ') || '-'}</p>
+        </div>
       </div>
 
       <div className="bg-white rounded-3xl p-6 shadow-xl border border-sky-100">
@@ -546,6 +570,25 @@ function ReportsTab({ appointments, records, patients, doctors }) {
             </div>
           )}
         </div>
+      </div>
+
+      <div className="bg-white rounded-3xl p-6 shadow-xl border border-emerald-100">
+        <h3 className="text-xl font-bold text-slate-800 mb-4">آخر المدفوعات</h3>
+        {payments.length === 0 ? (
+          <div className="text-center py-8 text-slate-500">لا توجد مدفوعات مسجلة</div>
+        ) : (
+          <div className="space-y-2">
+            {payments.slice(0, 10).map(p => (
+              <div key={p.id} className="bg-emerald-50 rounded-xl p-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-bold text-slate-800">{p.patients?.name || 'مريض'} • {p.notes || p.payment_method}</p>
+                  <p className="text-xs text-slate-500">استقبال: {p.admin_users?.full_name || '-'} • دكتور: {p.appointments?.doctors?.name || '-'}</p>
+                </div>
+                <p className="font-black text-emerald-700">{parseFloat(p.amount || 0).toFixed(0)} ر.س</p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-3xl p-6 shadow-xl border border-sky-100">
