@@ -218,6 +218,9 @@ function AdminDashboard({ user, clinic, onLogout, setClinic }) {
   const [complaints, setComplaints] = useState([])
   const [services, setServices] = useState([])
   const [records, setRecords] = useState([])
+  const [payments, setPayments] = useState([])
+  const [staffUsers, setStaffUsers] = useState([])
+  const [workSessions, setWorkSessions] = useState([])
   const [notification, setNotification] = useState(null)
 
   useEffect(() => { loadAll() }, [])
@@ -244,18 +247,34 @@ function AdminDashboard({ user, clinic, onLogout, setClinic }) {
     }
   })
 
+
+  useRealtime('payments', (payload) => {
+    if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) loadAll()
+  }, { column: 'clinic_id', value: clinic.id })
+
+  useRealtime('work_sessions', (payload) => {
+    if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) loadAll()
+  }, { column: 'clinic_id', value: clinic.id })
+
+  useRealtime('admin_users', (payload) => {
+    if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) loadAll()
+  }, { column: 'clinic_id', value: clinic.id })
+
   const loadAll = async () => {
     const today = new Date().toISOString().split('T')[0]
     const startOfMonth = new Date(); startOfMonth.setDate(1)
     const monthStart = startOfMonth.toISOString().split('T')[0]
 
-    const [p, d, a, c, s, r] = await Promise.all([
+    const [p, d, a, c, s, r, pay, staff, ws] = await Promise.all([
       supabase.from('patients').select('*').eq('clinic_id', clinic.id).order('created_at', { ascending: false }),
       supabase.from('doctors').select('*').eq('clinic_id', clinic.id).order('created_at', { ascending: false }),
       supabase.from('appointments').select('*, patients(*), doctors(*)').eq('clinic_id', clinic.id).order('appointment_date', { ascending: false }),
       supabase.from('complaints').select('*, patients(*)').eq('clinic_id', clinic.id).order('created_at', { ascending: false }),
       supabase.from('clinic_services').select('*').eq('clinic_id', clinic.id).order('name'),
-      supabase.from('medical_records').select('*, patients(name), doctors(name)').eq('clinic_id', clinic.id).order('created_at', { ascending: false })
+      supabase.from('medical_records').select('*, patients(name), doctors(name)').eq('clinic_id', clinic.id).order('created_at', { ascending: false }),
+      supabase.from('payments').select('*, patients(name, phone), appointments(doctor_id, doctors(name)), admin_users(full_name)').eq('clinic_id', clinic.id).order('paid_at', { ascending: false }).limit(200),
+      supabase.from('admin_users').select('*').eq('clinic_id', clinic.id).in('role', ['receptionist', 'accountant']).order('created_at', { ascending: false }),
+      supabase.from('work_sessions').select('*').eq('clinic_id', clinic.id).order('clock_in', { ascending: false }).limit(200)
     ])
 
     setPatients(p.data || [])
@@ -264,9 +283,13 @@ function AdminDashboard({ user, clinic, onLogout, setClinic }) {
     setComplaints(c.data || [])
     setServices(s.data || [])
     setRecords(r.data || [])
+    setPayments(pay.data || [])
+    setStaffUsers(staff.data || [])
+    setWorkSessions(ws.data || [])
 
-    const totalRev = (r.data || []).reduce((sum, x) => sum + (parseFloat(x.paid_amount) || 0), 0)
-    const monthRev = (r.data || []).filter(x => x.created_at >= monthStart).reduce((sum, x) => sum + (parseFloat(x.paid_amount) || 0), 0)
+    const paymentsData = pay.data || []
+    const totalRev = paymentsData.reduce((sum, x) => sum + (parseFloat(x.amount) || 0), 0)
+    const monthRev = paymentsData.filter(x => x.paid_at >= monthStart).reduce((sum, x) => sum + (parseFloat(x.amount) || 0), 0)
 
     setStats({
       patients: p.data?.length || 0,
@@ -302,7 +325,7 @@ function AdminDashboard({ user, clinic, onLogout, setClinic }) {
                 <p className="text-white/80 text-xs">{user.full_name || user.username}</p>
               </div>
             </div>
-            <button onClick={async () => { if (work?.active) await work.endShift(); onLogout() }} className="bg-white/20 hover:bg-red-500/40 text-white px-4 py-2 rounded-xl flex items-center gap-2 transition">
+            <button onClick={onLogout} className="bg-white/20 hover:bg-red-500/40 text-white px-4 py-2 rounded-xl flex items-center gap-2 transition">
               <LogOut className="w-4 h-4" />
               <span className="hidden sm:inline text-sm font-bold">خروج</span>
             </button>
@@ -317,6 +340,8 @@ function AdminDashboard({ user, clinic, onLogout, setClinic }) {
               { id: 'appointments', label: 'المواعيد', icon: Calendar },
               { id: 'schedules', label: 'جداول الأطباء', icon: Clock },
               { id: 'services', label: 'الخدمات', icon: DollarSign },
+              { id: 'staff', label: 'الموظفين', icon: Users },
+              { id: 'team_status', label: 'الدوام', icon: Clock },
               { id: 'complaints', label: 'الشكاوى', icon: AlertCircle },
               { id: 'settings', label: 'إعدادات', icon: Settings },
             ].map(t => (
@@ -338,6 +363,8 @@ function AdminDashboard({ user, clinic, onLogout, setClinic }) {
         {tab === 'appointments' && <AppointmentsManageTab appointments={appointments} />}
         {tab === 'schedules' && <SchedulesManageTab doctors={doctors} clinic={clinic} />}
         {tab === 'services' && <ServicesTab services={services} clinic={clinic} />}
+        {tab === 'staff' && <StaffUsersTab staffUsers={staffUsers} clinic={clinic} onUpdate={loadAll} />}
+        {tab === 'team_status' && <AdminTeamStatusTab doctors={doctors} staffUsers={staffUsers} workSessions={workSessions} payments={payments} records={records} />}
         {tab === 'complaints' && <ComplaintsManageTab complaints={complaints} />}
         {tab === 'settings' && <ClinicSettingsTab clinic={clinic} setClinic={setClinic} />}
       </div>
@@ -1191,6 +1218,108 @@ function ClinicSettingsTab({ clinic, setClinic }) {
             <Save className="w-5 h-5" /> {loading ? '⏳ جاري الحفظ...' : 'حفظ الإعدادات'}
           </button>
         </form>
+      </div>
+    </div>
+  )
+}
+
+
+function StaffUsersTab({ staffUsers, clinic, onUpdate }) {
+  const [showForm, setShowForm] = useState(false)
+  const [editing, setEditing] = useState(null)
+  const [form, setForm] = useState({ full_name: '', username: '', password: '1111', phone: '', email: '', role: 'receptionist', is_active: true })
+
+  const resetForm = () => {
+    setEditing(null)
+    setForm({ full_name: '', username: '', password: '1111', phone: '', email: '', role: 'receptionist', is_active: true })
+  }
+
+  const startEdit = (u) => {
+    setEditing(u)
+    setForm({ full_name: u.full_name || '', username: u.username || '', password: u.password || '', phone: u.phone || '', email: u.email || '', role: u.role || 'receptionist', is_active: u.is_active !== false })
+    setShowForm(true)
+  }
+
+  const submit = async (e) => {
+    e.preventDefault()
+    const payload = { clinic_id: clinic.id, full_name: form.full_name, username: form.username, password: form.password, phone: form.phone || null, email: form.email || null, role: form.role, is_active: form.is_active }
+    const { error } = editing
+      ? await supabase.from('admin_users').update(payload).eq('id', editing.id)
+      : await supabase.from('admin_users').insert([payload])
+    if (error) return alert('❌ ' + error.message)
+    resetForm(); setShowForm(false); onUpdate()
+  }
+
+  const toggleActive = async (u) => {
+    const { error } = await supabase.from('admin_users').update({ is_active: !u.is_active }).eq('id', u.id)
+    if (error) return alert('❌ ' + error.message)
+    onUpdate()
+  }
+
+  const del = async (id) => {
+    if (!confirm('هل تريد حذف هذا الموظف؟')) return
+    const { error } = await supabase.from('admin_users').delete().eq('id', id)
+    if (error) return alert('❌ ' + error.message)
+    onUpdate()
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
+        <h2 className="text-3xl font-black text-slate-800 flex items-center gap-2"><Users className="w-8 h-8 text-sky-600" /> الموظفين والصلاحيات</h2>
+        <button onClick={() => { if (showForm) resetForm(); setShowForm(!showForm) }} className="gradient-medical text-white px-5 py-3 rounded-2xl font-bold shadow-xl btn-medical flex items-center gap-2"><Plus className="w-5 h-5" /> {showForm ? 'إلغاء' : 'موظف جديد'}</button>
+      </div>
+
+      {showForm && (
+        <div className="bg-white rounded-3xl p-6 shadow-xl border border-sky-100">
+          <h3 className="text-xl font-bold mb-4 text-slate-800">{editing ? 'تعديل موظف' : 'إضافة موظف'}</h3>
+          <form onSubmit={submit} className="grid md:grid-cols-2 gap-4">
+            <input required placeholder="الاسم الكامل" value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" />
+            <input required placeholder="اسم المستخدم" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" />
+            <input required placeholder="كلمة المرور" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" />
+            <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none"><option value="receptionist">موظف استقبال</option><option value="accountant">محاسب</option></select>
+            <input placeholder="رقم الجوال" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" />
+            <input type="email" placeholder="البريد الإلكتروني" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="px-4 py-3 border-2 border-slate-200 rounded-xl input-medical outline-none" />
+            <label className="md:col-span-2 flex items-center gap-2 bg-slate-50 rounded-xl p-4 font-bold text-slate-700"><input type="checkbox" checked={form.is_active} onChange={(e) => setForm({ ...form, is_active: e.target.checked })} /> الحساب نشط</label>
+            <button type="submit" className="md:col-span-2 py-3 gradient-success text-white rounded-xl font-bold shadow-lg">{editing ? 'حفظ التعديل' : 'إضافة الموظف'}</button>
+          </form>
+        </div>
+      )}
+
+      <div className="bg-white rounded-3xl p-6 shadow-xl border border-sky-100">
+        {staffUsers.length === 0 ? <div className="text-center py-12 text-slate-500"><Users className="w-12 h-12 mx-auto mb-2 text-slate-300" /><p>لا يوجد موظفون</p></div> : (
+          <div className="grid md:grid-cols-2 gap-4">
+            {staffUsers.map((u) => (
+              <div key={u.id} className="border-2 border-slate-100 rounded-2xl p-4">
+                <div className="flex items-start justify-between gap-3"><div><p className="font-black text-slate-800 text-lg">{u.full_name || u.username}</p><p className="text-sm text-slate-600">{u.role === 'receptionist' ? 'موظف استقبال' : 'محاسب'}</p><p className="text-xs text-slate-500 mt-1">المستخدم: {u.username}</p>{u.phone && <p className="text-xs text-slate-500">الجوال: {u.phone}</p>}</div><span className={`px-3 py-1 rounded-full text-xs font-bold ${u.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{u.is_active ? 'نشط' : 'غير نشط'}</span></div>
+                <div className="flex gap-2 mt-4 flex-wrap"><button onClick={() => startEdit(u)} className="bg-sky-50 text-sky-700 px-3 py-2 rounded-xl text-sm font-bold">تعديل</button><button onClick={() => toggleActive(u)} className="bg-amber-50 text-amber-700 px-3 py-2 rounded-xl text-sm font-bold">{u.is_active ? 'تعطيل' : 'تفعيل'}</button><button onClick={() => del(u.id)} className="bg-red-50 text-red-600 px-3 py-2 rounded-xl text-sm font-bold">حذف</button></div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function AdminTeamStatusTab({ doctors, staffUsers, workSessions, payments, records }) {
+  const activeKey = (type, id) => workSessions.find(s => s.user_type === type && s.user_id === id && !s.clock_out)
+  const today = new Date().toISOString().split('T')[0]
+  const minutesFor = (type, id) => workSessions.filter(s => s.user_type === type && s.user_id === id && s.clock_in?.substring(0,10) === today).reduce((sum, s) => sum + (parseInt(s.total_minutes) || (!s.clock_out ? Math.max(0, Math.round((new Date() - new Date(s.clock_in)) / 60000)) : 0)), 0)
+  const rows = [
+    ...doctors.map(d => ({ type: 'doctor', id: d.id, name: d.name, role: 'طبيب' })),
+    ...staffUsers.map(u => ({ type: 'admin_user', id: u.id, name: u.full_name || u.username, role: u.role === 'receptionist' ? 'استقبال' : 'محاسب' }))
+  ]
+  return (
+    <div className="bg-white rounded-3xl p-6 shadow-xl border border-sky-100">
+      <h2 className="text-3xl font-black text-slate-800 flex items-center gap-2 mb-6"><Clock className="w-8 h-8 text-sky-600" /> الدوام وحالة الفريق</h2>
+      <div className="grid md:grid-cols-2 gap-4">
+        {rows.map(r => {
+          const active = activeKey(r.type, r.id)
+          const status = active?.status === 'break' ? 'استراحة' : active ? 'نشط' : 'غير نشط'
+          const color = active?.status === 'break' ? 'bg-amber-100 text-amber-700' : active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'
+          return <div key={`${r.type}-${r.id}`} className="border-2 border-slate-100 rounded-2xl p-4"><div className="flex items-start justify-between"><div><p className="font-black text-slate-800">{r.name}</p><p className="text-sm text-slate-500">{r.role}</p><p className="text-xs text-slate-500 mt-1">ساعات اليوم: {formatMinutesArabic(minutesFor(r.type, r.id))}</p></div><span className={`px-3 py-1 rounded-full text-xs font-bold ${color}`}>{status}</span></div></div>
+        })}
       </div>
     </div>
   )
