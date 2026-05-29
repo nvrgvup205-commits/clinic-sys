@@ -302,7 +302,7 @@ function AdminDashboard({ user, clinic, onLogout, setClinic }) {
                 <p className="text-white/80 text-xs">{user.full_name || user.username}</p>
               </div>
             </div>
-            <button onClick={onLogout} className="bg-white/20 hover:bg-red-500/40 text-white px-4 py-2 rounded-xl flex items-center gap-2 transition">
+            <button onClick={async () => { if (work?.active) await work.endShift(); onLogout() }} className="bg-white/20 hover:bg-red-500/40 text-white px-4 py-2 rounded-xl flex items-center gap-2 transition">
               <LogOut className="w-4 h-4" />
               <span className="hidden sm:inline text-sm font-bold">خروج</span>
             </button>
@@ -1290,7 +1290,7 @@ function DoctorDashboard({ user, clinic, onLogout }) {
                 <p className="text-white/80 text-xs">{user.specialization} • {clinic?.name}</p>
               </div>
             </div>
-            <button onClick={onLogout} className="bg-white/20 hover:bg-red-500/40 text-white px-4 py-2 rounded-xl flex items-center gap-2 transition">
+            <button onClick={async () => { if (work.active) await work.endShift(); onLogout() }} className="bg-white/20 hover:bg-red-500/40 text-white px-4 py-2 rounded-xl flex items-center gap-2 transition">
               <LogOut className="w-4 h-4" />
               <span className="hidden sm:inline text-sm font-bold">خروج</span>
             </button>
@@ -1828,11 +1828,14 @@ function ReceptionDashboard({ user, clinic, onLogout }) {
     const patientId = selectedPaymentApt?.patient_id || selectedPaymentRequest?.patient_id
     const appointmentId = selectedPaymentApt?.id || selectedPaymentRequest?.appointment_id
 
+    const { data: generatedInvoiceNo } = await supabase.rpc('generate_invoice_no', { p_clinic_id: clinic.id })
+    const invoiceNo = generatedInvoiceNo || `INV-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${Date.now()}`
+
     const { data: invoice, error: invoiceError } = await supabase.from('invoices').insert([{
       clinic_id: clinic.id,
       patient_id: patientId,
       appointment_id: appointmentId,
-      invoice_no: `INV-${Date.now()}`,
+      invoice_no: invoiceNo,
       items: [{ id: srv?.id || selectedPaymentRequest?.service_id, name: srv?.name || selectedPaymentRequest?.service_name || 'خدمة', qty: 1, price: amount }],
       subtotal: amount,
       total: amount,
@@ -1890,7 +1893,7 @@ function ReceptionDashboard({ user, clinic, onLogout }) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-sky-50 to-cyan-50 page-enter" dir="rtl">
       {notification && <Toast msg={notification} gradient="gradient-warning" />}
-      <StaffHeader title="شاشة الاستقبال" subtitle={`${user.full_name || user.username} • ${clinic.name}`} icon={Users} gradient="gradient-medical-dark" onLogout={onLogout} />
+      <StaffHeader title="شاشة الاستقبال" subtitle={`${user.full_name || user.username} • ${clinic.name}`} icon={Users} gradient="gradient-medical-dark" onLogout={async () => { if (work.active) await work.endShift(); onLogout() }} />
 
       <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-5">
         <WorkStatusBar work={work} />
@@ -2208,32 +2211,25 @@ function AccountantDashboard({ user, clinic, onLogout }) {
   const [tab, setTab] = useState('dashboard')
   const [showExpenseForm, setShowExpenseForm] = useState(false)
   const [expenseForm, setExpenseForm] = useState({ description: '', amount: '', category: 'مصاريف متنوعة', payment_method: 'cash', date: new Date().toISOString().split('T')[0], vendor: '', notes: '' })
-useEffect(() => { loadAccountingData() }, [])
-useRealtime('payments', (payload) => {
-  if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) {
-    loadAccountingData()
+
+  useEffect(() => { loadAccountingData() }, [])
+
+  useRealtime('payments', (payload) => {
+    if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) loadAccountingData()
+  }, { column: 'clinic_id', value: clinic.id })
+
+  const loadAccountingData = async () => {
+    const [r, p, e, ws] = await Promise.all([
+      supabase.from('medical_records').select('*, patients(name), doctors(name)').eq('clinic_id', clinic.id).order('created_at', { ascending: false }),
+      supabase.from('payments').select('*, patients(name, phone), appointments(doctor_id, doctors(name)), admin_users(full_name)').eq('clinic_id', clinic.id).order('paid_at', { ascending: false }),
+      supabase.from('expenses').select('*').eq('clinic_id', clinic.id).order('date', { ascending: false }),
+      supabase.from('work_sessions').select('*').eq('clinic_id', clinic.id).order('clock_in', { ascending: false }).limit(100),
+    ])
+    setRecords(r.data || [])
+    setPayments(p.data || [])
+    setExpenses(e.data || [])
+    setWorkSessions(ws.data || [])
   }
-}, { column: 'clinic_id', value: clinic.id })
-
-useRealtime('work_sessions', (payload) => {
-  if (payload.new?.clinic_id === clinic.id || payload.old?.clinic_id === clinic.id) {
-    loadAccountingData()
-  }
-}, { column: 'clinic_id', value: clinic.id })
-
-const loadAccountingData = async () => {
-  const [r, p, e, ws] = await Promise.all([
-    supabase.from('medical_records').select('*, patients(name), doctors(name)').eq('clinic_id', clinic.id).order('created_at', { ascending: false }),
-    supabase.from('payments').select('*, patients(name, phone), appointments(doctor_id, doctors(name)), admin_users(full_name)').eq('clinic_id', clinic.id).order('paid_at', { ascending: false }),
-    supabase.from('expenses').select('*').eq('clinic_id', clinic.id).order('date', { ascending: false }),
-    supabase.from('work_sessions').select('*').eq('clinic_id', clinic.id).order('clock_in', { ascending: false }).limit(100),
-  ])
-
-  setRecords(r.data || [])
-  setPayments(p.data || [])
-  setExpenses(e.data || [])
-  setWorkSessions(ws.data || [])
-}
 
   const addExpense = async (e) => {
     e.preventDefault()
@@ -2667,13 +2663,33 @@ function useWorkSession({ clinic, userType, userId, userName, role }) {
   const start = async () => {
     await loadSession()
     const { data: existing } = await supabase.from('work_sessions').select('*').eq('clinic_id', clinic.id).eq('user_type', userType).eq('user_id', userId).is('clock_out', null).maybeSingle()
-    if (existing) { setSession(existing); return }
-    const { data, error } = await supabase.from('work_sessions').insert([{ clinic_id: clinic.id, user_type: userType, user_id: userId, user_name: userName, role }]).select().single()
+    if (existing) {
+      if (existing.status === 'break') {
+        const { data } = await supabase.from('work_sessions').update({ status: 'active' }).eq('id', existing.id).select().single()
+        setSession(data || existing)
+      } else setSession(existing)
+      return
+    }
+    const { data, error } = await supabase.from('work_sessions').insert([{ clinic_id: clinic.id, user_type: userType, user_id: userId, user_name: userName, role, status: 'active' }]).select().single()
     if (error) return alert('❌ ' + error.message)
     setSession(data)
   }
 
-  const stop = async () => {
+  const takeBreak = async () => {
+    if (!session) return
+    const { data, error } = await supabase.from('work_sessions').update({ status: 'break' }).eq('id', session.id).select().single()
+    if (error) return alert('❌ ' + error.message)
+    setSession(data)
+  }
+
+  const backFromBreak = async () => {
+    if (!session) return
+    const { data, error } = await supabase.from('work_sessions').update({ status: 'active' }).eq('id', session.id).select().single()
+    if (error) return alert('❌ ' + error.message)
+    setSession(data)
+  }
+
+  const endShift = async () => {
     if (!session) return
     const now = new Date()
     const startDate = new Date(session.clock_in)
@@ -2687,7 +2703,18 @@ function useWorkSession({ clinic, userType, userId, userName, role }) {
   const activeMinutes = session ? Math.max(0, Math.round((new Date() - new Date(session.clock_in)) / 60000)) : 0
   const totalToday = todayMinutes + activeMinutes + tick * 0
 
-  return { active: !!session, session, todayMinutes: totalToday, start, stop, reload: loadSession }
+  return {
+    active: !!session,
+    isBreak: session?.status === 'break',
+    session,
+    todayMinutes: totalToday,
+    start,
+    takeBreak,
+    backFromBreak,
+    endShift,
+    stop: endShift,
+    reload: loadSession
+  }
 }
 
 function formatMinutesArabic(minutes) {
@@ -2714,13 +2741,23 @@ function DutyGate({ clinic, userName, roleLabel, icon: Icon, work, onLogout }) {
 }
 
 function WorkStatusBar({ work }) {
+  const isBreak = work.isBreak
   return (
-    <div className="bg-white rounded-2xl p-4 shadow-soft border border-emerald-100 flex items-center justify-between gap-3 flex-wrap">
+    <div className={`bg-white rounded-2xl p-4 shadow-soft border flex items-center justify-between gap-3 flex-wrap ${isBreak ? 'border-amber-200' : 'border-emerald-100'}`}>
       <div>
         <p className="text-xs text-slate-500">حالة الدوام</p>
-        <p className="font-black text-emerald-700">نشط الآن • عملت اليوم {formatMinutesArabic(work.todayMinutes)}</p>
+        <p className={`font-black ${isBreak ? 'text-amber-700' : 'text-emerald-700'}`}>
+          {isBreak ? 'استراحة مؤقتة' : 'نشط الآن'} • عملت اليوم {formatMinutesArabic(work.todayMinutes)}
+        </p>
       </div>
-      <button onClick={work.stop} className="gradient-danger text-white px-4 py-2 rounded-xl font-bold">خروج من الدوام</button>
+      <div className="flex gap-2 flex-wrap">
+        {isBreak ? (
+          <button onClick={work.backFromBreak} className="gradient-success text-white px-4 py-2 rounded-xl font-bold">عودة من الاستراحة</button>
+        ) : (
+          <button onClick={work.takeBreak} className="gradient-warning text-white px-4 py-2 rounded-xl font-bold">استراحة مؤقتة</button>
+        )}
+        <button onClick={work.endShift} className="gradient-danger text-white px-4 py-2 rounded-xl font-bold">إنهاء الدوام</button>
+      </div>
     </div>
   )
 }
