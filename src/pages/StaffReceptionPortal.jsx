@@ -1461,7 +1461,7 @@ function ExaminationView({ apt, clinic, services, doctor, onClose }) {
       amount,
       status: 'pending',
       requested_by: doctor.id,
-      notes: 'طلب خدمة إضافية من الطبيب'
+      notes: 'طلب خدمة إضا��ية من الطبيب'
     }])
     if (error) return alert('❌ ' + error.message)
     alert('✓ تم إرسال طلب الدفع للاستقبال')
@@ -2151,11 +2151,29 @@ function PaymentModal({ apt, request, requests = [], services, insuranceCompanie
               <div className="grid md:grid-cols-2 gap-2">
                 {services.map(s => {
                   const checked = (form.service_ids || []).includes(s.id)
-                  const price = form.payment_method === 'insurance' && parseFloat(s.insurance_price || 0) > 0 ? s.insurance_price : s.price
+                  const originalPrice = parseFloat(s.price || 0)
+                  const insurancePrice = parseFloat(s.insurance_price || 0)
+                  const basePrice = form.payment_method === 'insurance' && insurancePrice > 0 ? insurancePrice : originalPrice
+                  const discountPct = parseFloat(s.discount_pct || 0)
+                  const discountAmount = (basePrice * discountPct) / 100
+                  const finalPrice = Math.max(0, basePrice - discountAmount)
+                  const hasDiscount = discountPct > 0
                   return (
-                    <label key={s.id} className={`border-2 rounded-xl p-3 cursor-pointer flex items-center justify-between gap-2 ${checked ? 'border-emerald-300 bg-emerald-50' : 'border-slate-100 bg-slate-50'}`}>
-                      <span><input type="checkbox" checked={checked} onChange={() => toggleService(s.id)} className="ml-2" />{s.name}</span>
-                      <strong>{parseFloat(price || 0).toFixed(0)} ر.س</strong>
+                    <label key={s.id} className={`border-2 rounded-xl p-3 cursor-pointer ${checked ? 'border-emerald-300 bg-emerald-50' : 'border-slate-100 bg-slate-50'}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span><input type="checkbox" checked={checked} onChange={() => toggleService(s.id)} className="ml-2" />{s.name}</span>
+                        <div className="text-left">
+                          {hasDiscount ? (
+                            <>
+                              <span className="text-slate-400 line-through text-xs ml-1">{basePrice.toFixed(0)}</span>
+                              <strong className="text-emerald-700">{finalPrice.toFixed(0)} ر.س</strong>
+                            </>
+                          ) : (
+                            <strong>{finalPrice.toFixed(0)} ر.س</strong>
+                          )}
+                        </div>
+                      </div>
+                      {hasDiscount && <p className="text-xs text-emerald-600 mt-1">خصم {discountPct}% = وفّرت {discountAmount.toFixed(0)} ر.س</p>}
                     </label>
                   )
                 })}
@@ -2191,7 +2209,44 @@ function PaymentModal({ apt, request, requests = [], services, insuranceCompanie
           {!isRequestPayment && selectedServices.length > 0 && (
             <div className="bg-slate-50 rounded-2xl p-4">
               <p className="font-black text-slate-800 mb-2">ملخص الفاتورة</p>
-              {selectedServices.map(s => <div key={s.id} className="flex justify-between text-sm py-1"><span>{s.name}</span><strong>{(form.payment_method === 'insurance' && parseFloat(s.insurance_price || 0) > 0 ? s.insurance_price : s.price) || 0} ر.س</strong></div>)}
+              {selectedServices.map(s => {
+                const originalPrice = parseFloat(s.price || 0)
+                const insurancePrice = parseFloat(s.insurance_price || 0)
+                const basePrice = form.payment_method === 'insurance' && insurancePrice > 0 ? insurancePrice : originalPrice
+                const discountPct = parseFloat(s.discount_pct || 0)
+                const discountAmount = (basePrice * discountPct) / 100
+                const finalPrice = Math.max(0, basePrice - discountAmount)
+                return (
+                  <div key={s.id} className="flex justify-between text-sm py-1 border-b border-slate-200 last:border-0">
+                    <span>{s.name}</span>
+                    <div className="text-left">
+                      {discountPct > 0 && <span className="text-slate-400 line-through text-xs ml-2">{basePrice.toFixed(0)}</span>}
+                      <strong>{finalPrice.toFixed(0)} ر.س</strong>
+                      {discountPct > 0 && <span className="text-emerald-600 text-xs mr-1">(-{discountPct}%)</span>}
+                    </div>
+                  </div>
+                )
+              })}
+              {(() => {
+                const totals = selectedServices.reduce((acc, s) => {
+                  const basePrice = form.payment_method === 'insurance' && parseFloat(s.insurance_price || 0) > 0 ? parseFloat(s.insurance_price) : parseFloat(s.price || 0)
+                  const discountPct = parseFloat(s.discount_pct || 0)
+                  const discountAmount = (basePrice * discountPct) / 100
+                  acc.original += basePrice
+                  acc.discount += discountAmount
+                  acc.final += Math.max(0, basePrice - discountAmount)
+                  return acc
+                }, { original: 0, discount: 0, final: 0 })
+                return totals.discount > 0 ? (
+                  <div className="mt-3 pt-3 border-t-2 border-slate-300">
+                    <div className="flex justify-between text-sm text-slate-600"><span>المجموع قبل الخصم</span><span>{totals.original.toFixed(0)} ر.س</span></div>
+                    <div className="flex justify-between text-sm text-emerald-600 font-bold"><span>إجمالي الخصم</span><span>-{totals.discount.toFixed(0)} ر.س</span></div>
+                    <div className="flex justify-between text-lg font-black text-slate-800 mt-1"><span>المطلوب دفعه</span><span>{totals.final.toFixed(0)} ر.س</span></div>
+                  </div>
+                ) : (
+                  <div className="flex justify-between text-lg font-black text-slate-800 mt-3 pt-3 border-t-2 border-slate-300"><span>المطلوب دفعه</span><span>{totals.final.toFixed(0)} ر.س</span></div>
+                )
+              })()}
             </div>
           )}
 
@@ -2220,7 +2275,7 @@ function ReceptionAppointments({ appointments, onConfirm, onPaid, title }) {
               <div className="flex items-start justify-between flex-wrap gap-3">
                 <div>
                   <p className="font-bold text-slate-800 text-lg">{apt.patients?.name || 'مريض غير محدد'}</p>
-                  <p className="text-sm text-slate-600">📞 {apt.patients?.phone || '-'}</p>
+                  <p className="text-sm text-slate-600">���� {apt.patients?.phone || '-'}</p>
                   <p className="text-sm text-slate-600">👨‍⚕️ {apt.doctors?.name || '-'}</p>
                   <p className="text-sm font-bold text-sky-700 mt-1">{apt.appointment_date} • {apt.appointment_time?.substring(0,5)}</p>
                 </div>
@@ -2832,6 +2887,7 @@ function useWorkSession({ clinic, userType, userId, userName, role }) {
   const [session, setSession] = useState(null)
   const [todayMinutes, setTodayMinutes] = useState(0)
   const [tick, setTick] = useState(0)
+  const [starting, setStarting] = useState(false)
 
   useEffect(() => { loadSession() }, [clinic?.id, userId])
   useEffect(() => {
@@ -2852,18 +2908,24 @@ function useWorkSession({ clinic, userType, userId, userName, role }) {
   }
 
   const start = async () => {
-    await loadSession()
-    const { data: existing } = await supabase.from('work_sessions').select('*').eq('clinic_id', clinic.id).eq('user_type', userType).eq('user_id', userId).is('clock_out', null).maybeSingle()
-    if (existing) {
-      if (existing.status === 'break') {
-        const { data } = await supabase.from('work_sessions').update({ status: 'active' }).eq('id', existing.id).select().single()
-        setSession(data || existing)
-      } else setSession(existing)
-      return
+    setStarting(true)
+    try {
+      await loadSession()
+      const { data: existing } = await supabase.from('work_sessions').select('*').eq('clinic_id', clinic.id).eq('user_type', userType).eq('user_id', userId).is('clock_out', null).maybeSingle()
+      if (existing) {
+        if (existing.status === 'break') {
+          const { data } = await supabase.from('work_sessions').update({ status: 'active' }).eq('id', existing.id).select().single()
+          setSession(data || existing)
+        } else setSession(existing)
+        setStarting(false)
+        return
+      }
+      const { data, error } = await supabase.from('work_sessions').insert([{ clinic_id: clinic.id, user_type: userType, user_id: userId, user_name: userName, role, status: 'active' }]).select().single()
+      if (error) { setStarting(false); return alert('❌ ' + error.message) }
+      setSession(data)
+    } finally {
+      setStarting(false)
     }
-    const { data, error } = await supabase.from('work_sessions').insert([{ clinic_id: clinic.id, user_type: userType, user_id: userId, user_name: userName, role, status: 'active' }]).select().single()
-    if (error) return alert('❌ ' + error.message)
-    setSession(data)
   }
 
   const takeBreak = async () => {
@@ -2899,6 +2961,7 @@ function useWorkSession({ clinic, userType, userId, userName, role }) {
     isBreak: session?.status === 'break',
     session,
     todayMinutes: totalToday,
+    starting,
     start,
     takeBreak,
     backFromBreak,
@@ -2924,8 +2987,15 @@ function DutyGate({ clinic, userName, roleLabel, icon: Icon, work, onLogout }) {
         </div>
         <h1 className="text-2xl font-black text-slate-800 mb-2">أهلاً {userName}</h1>
         <p className="text-slate-500 mb-6">لبدء استخدام لوحة {roleLabel} في {clinic.name}، اضغط بدء الدوام.</p>
-        <button onClick={work.start} className="w-full py-4 gradient-success text-white rounded-2xl font-black shadow-xl mb-3">بدء الدوام</button>
-        <button onClick={onLogout} className="w-full py-3 bg-slate-100 text-slate-700 rounded-2xl font-bold">تسجيل خروج</button>
+        <button onClick={work.start} disabled={work.starting} className="w-full py-4 gradient-success text-white rounded-2xl font-black shadow-xl mb-3 disabled:opacity-70">
+          {work.starting ? (
+            <span className="flex items-center justify-center gap-2">
+              <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+              جاري بدء الدوام...
+            </span>
+          ) : 'بدء الدوام'}
+        </button>
+        <button onClick={onLogout} disabled={work.starting} className="w-full py-3 bg-slate-100 text-slate-700 rounded-2xl font-bold disabled:opacity-50">تسجيل خروج</button>
       </div>
     </div>
   )
